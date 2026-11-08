@@ -1,7 +1,7 @@
 pyTelegramBotAPI
 requests
 phonenumbers
-pyTelegramBotAPI
-requests
-phonenumbers
 Flask
+sqlite3
+schedule
+zarinpal
