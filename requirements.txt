@@ -3,4 +3,3 @@ requests
 phonenumbers
 Flask
 schedule
-zarinpal
