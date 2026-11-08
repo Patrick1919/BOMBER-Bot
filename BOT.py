@@ -7,7 +7,7 @@ import os
 import telebot
 
 # توکن از تنظیمات رندر (Environment Variables) خونده میشه
-BOT_TOKEN = os.environ.get('BOT_TOKEN', '9209441056:AAF9QO5mFf5wgfllayhpM4vUpY7QvBERtjk')
+BOT_TOKEN = os.environ.get('BOT_TOKEN', '9209441056:AAHzHXJK-oEIBQeUbi8vOpa0jZwvz4a772Q')
 
 bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
 bot_state = {"running": False, "phone": "", "success": 0, "fail": 0}
