@@ -8,49 +8,15 @@ import json
 import sqlite3
 import telebot
 from telebot import types
-from flask import Flask, request
+from flask import Flask
 from datetime import datetime
 
 # ==========================================
-# 1. وب‌سرور و درگاه پرداخت (Flask)
+# 1. وب‌سرور برای سلامت پورت (Render)
 # ==========================================
 app = Flask(__name__)
-MERCHANT_ID = "YOUR_ZARINPAL_MERCHANT_ID" # 👈 مرچنت آیدی خودت رو اینجا بذار
-RENDER_URL = "https://bomber-bot-6-qgpv.onrender.com" # 👈 آدرس رندر خودت
-
 @app.route('/')
 def health(): return "Bot is running!", 200
-
-@app.route('/verify')
-def verify_payment():
-    authority = request.args.get('Authority')
-    status = request.args.get('Status')
-    user_id = request.args.get('user_id')
-    plan_key = request.args.get('plan')
-    
-    if status != 'OK' or not authority or not user_id or not plan_key:
-        return "پرداخت ناموفق.", 400
-    
-    url = "https://payment.zarinpal.com/pg/v4/payment/verify.json"
-    payload = {"merchant_id": MERCHANT_ID, "amount": PLANS[plan_key]['price'] * 10, "authority": authority}
-    headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
-    
-    try:
-        response = requests.post(url, json=payload, headers=headers, timeout=10).json()
-        if response.get('data') and response['data'].get('code') == 100:
-            user = get_user(user_id)
-            if user:
-                plan = PLANS[plan_key]
-                user['plan'] = plan_key
-                user['uses'] += plan['uses']
-                if plan.get('days', 0) > 0: user['sub_expiry'] = time.time() + (plan['days'] * 86400)
-                save_user(**user)
-                try: bot.send_message(user_id, f"🎉 **پرداخت موفق!**\nپلن **{plan['name']}** فعال شد.", parse_mode='Markdown')
-                except: pass
-                return "پرداخت موفق! به ربات برگردید.", 200
-        return "خطا در تایید.", 400
-    except: return "خطای درگاه.", 500
-
 def run_web():
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port, use_reloader=False)
@@ -61,6 +27,7 @@ threading.Thread(target=run_web, daemon=True).start()
 # ==========================================
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 ADMIN_ID = 6914309071
+CARD_NUMBER = "[شماره_کارت_اینجا]" # ⚠️ شماره کارت خودت رو اینجا بذار
 DB_FILE = "bot_database.db"
 bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
 
@@ -217,10 +184,8 @@ class Bomber:
         if self.stop_event.is_set(): return
         try:
             data = service['data']()
-            # جایگزینی شماره در دیتای سرویس
             if 'phone' in data: data['phone'] = phone
             if 'mobile' in data: data['mobile'] = phone
-            # ... این بخش بستگی به ساختار سرویس‌های تو داره ...
             
             headers = {'User-Agent': "Mozilla/5.0"}
             method = service['method'].upper()
@@ -294,6 +259,7 @@ def cmd_admin(message):
     markup.add(
         types.InlineKeyboardButton("📊 آمار کل", callback_data="admin_stats"),
         types.InlineKeyboardButton("📢 پیام همگانی", callback_data="admin_broadcast"),
+        types.InlineKeyboardButton("🎁 شارژ همگانی", callback_data="admin_bulk_charge"),
         types.InlineKeyboardButton("🔑 ساخت کد هدیه", callback_data="admin_gifts"),
         types.InlineKeyboardButton("👤 مشاهده کاربر", callback_data="admin_view_user"),
         types.InlineKeyboardButton("💾 دریافت بکاپ دیتابیس", callback_data="admin_backup")
@@ -319,11 +285,13 @@ def handle_callbacks(call):
         sub_status = "فعال" if user['sub_expiry'] > time.time() else "منقضی"
         text = f"📋 **پروفایل:**\n\n👤 نام: {user['name']}\n💎 پلن: **{plan_name}**\n⚡️ اعتبار: **{user['uses']}**\n📅 وضعیت VIP: **{sub_status}**\n🛍 تعداد خرید: **{user['total_purchases']}**"
         markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("✏️ تغییر نام", callback_data="menu_change_name"))
+        markup.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="menu_back"))
         bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
 
     elif call.data == "menu_change_name":
         user_states[user_id] = {"state": "waiting_for_name"}
-        bot.edit_message_text("✏️ نام جدید:", call.message.chat.id, call.message.message_id)
+        markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="menu_profile"))
+        bot.edit_message_text("✏️ نام جدید خود را وارد کنید:", call.message.chat.id, call.message.message_id, reply_markup=markup)
 
     elif call.data == "menu_leaderboard":
         conn = sqlite3.connect(DB_FILE)
@@ -337,7 +305,8 @@ def handle_callbacks(call):
 
     elif call.data == "menu_support":
         user_states[user_id] = {"state": "waiting_for_support"}
-        bot.edit_message_text("🎧 پیام خود را بنویسید:", call.message.chat.id, call.message.message_id)
+        markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="menu_back"))
+        bot.edit_message_text("🎧 پیام خود را بنویسید:", call.message.chat.id, call.message.message_id, reply_markup=markup)
 
     elif call.data == "menu_referral":
         bot_username = bot.get_me().username
@@ -367,26 +336,22 @@ def handle_callbacks(call):
         plan_key = call.data.replace("buy_", "")
         plan = PLANS[plan_key]
         
-        # اعمال کد تخفیف اگر وجود دارد
+        user_states[user_id] = {"selected_plan": plan_key}
+        
         final_price = plan['price']
         if user_id in user_coupons:
-            final_price = int(final_price * 0.8) # 20% تخفیف
+            final_price = int(final_price * 0.8)
             bot.answer_callback_query(call.id, "🎟 کد تخفیف ۲۰٪ اعمال شد!", show_alert=True)
             del user_coupons[user_id]
 
-        callback = f"{RENDER_URL}/verify?user_id={user_id}&plan={plan_key}"
-        url = "https://payment.zarinpal.com/pg/v4/payment/request.json"
-        payload = {"merchant_id": MERCHANT_ID, "amount": final_price * 10, "description": f"خرید {plan['name']}", "callback_url": callback}
-        try:
-            resp = requests.post(url, json=payload, headers={'Content-Type': 'application/json'}, timeout=10).json()
-            if resp.get('data') and resp['data'].get('code') == 100:
-                pay_url = f"https://payment.zarinpal.com/pg/StartPay/{resp['data']['authority']}"
-                markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("💳 پرداخت آنلاین", url=pay_url))
-                bot.edit_message_text(f"✅ پلن **{plan['name']}** انتخاب شد.\n💳 مبلغ: **{final_price} تومان**\nبرای پرداخت کلیک کنید:", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
-            else:
-                bot.answer_callback_query(call.id, "❌ خطا در اتصال به درگاه.", show_alert=True)
-        except:
-            bot.answer_callback_query(call.id, "❌ خطا در اتصال به درگاه.", show_alert=True)
+        text = (
+            f"✅ پلن **{plan['name']}** انتخاب شد.\n\n"
+            f"💳 مبلغ **{final_price} هزار تومان** را به شماره کارت زیر واریز کنید:\n"
+            f"`{CARD_NUMBER}`\n\n"
+            "📸 سپس **عکس رسید** را همینجا ارسال کنید."
+        )
+        markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="menu_buy"))
+        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
 
     elif call.data == "menu_bomb":
         today = datetime.now().strftime("%Y-%m-%d")
@@ -421,6 +386,11 @@ def handle_callbacks(call):
         msg = bot.send_message(call.message.chat.id, "📝 متن پیام:")
         bot.register_next_step_handler(msg, send_broadcast)
 
+    elif call.data == "admin_bulk_charge" and call.from_user.id == ADMIN_ID:
+        bot.answer_callback_query(call.id)
+        msg = bot.send_message(call.message.chat.id, "🎁 چند اعتبار به همه کاربران بدم؟ (فقط عدد بفرست):")
+        bot.register_next_step_handler(msg, process_bulk_charge)
+
     elif call.data == "admin_gifts" and call.from_user.id == ADMIN_ID:
         bot.answer_callback_query(call.id)
         msg = bot.send_message(call.message.chat.id, "🔑 فرمت: `CODE USES` (مثال: `WELCOME 10`):")
@@ -444,6 +414,32 @@ def handle_callbacks(call):
         msg = bot.send_message(call.message.chat.id, "پاسخ خود را بنویسید:")
         bot.register_next_step_handler(msg, lambda m: send_reply_to_user(m, target_user))
 
+    # تایید و رد رسید
+    elif call.data.startswith("admin_approve_"):
+        req_id = call.data.replace("admin_approve_", "")
+        if req_id in pending_approvals:
+            data = pending_approvals[req_id]
+            uid, plan_key = data["user_id"], data["plan"]
+            plan = PLANS[plan_key]
+            user_data = get_user(uid)
+            if user_data:
+                user_data["plan"] = plan_key
+                user_data["uses"] += plan["uses"]
+                user_data["total_purchases"] += 1
+                if plan.get('days', 0) > 0: user_data["sub_expiry"] = time.time() + (plan['days'] * 86400)
+                save_user(**user_data)
+                bot.send_message(uid, f"🎉 **پرداخت تایید شد!**\nپلن **{plan['name']}** فعال شد.", parse_mode='Markdown')
+            bot.edit_message_text(f"✅ تایید شد.", call.message.chat.id, call.message.message_id)
+            del pending_approvals[req_id]
+
+    elif call.data.startswith("admin_reject_"):
+        req_id = call.data.replace("admin_reject_", "")
+        if req_id in pending_approvals:
+            uid = pending_approvals[req_id]["user_id"]
+            bot.edit_message_text("❌ رد شد.", call.message.chat.id, call.message.message_id)
+            bot.send_message(uid, "❌ رسید شما رد شد.")
+            del pending_approvals[req_id]
+
 def send_broadcast(message):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
@@ -455,6 +451,36 @@ def send_broadcast(message):
         try: bot.send_message(u[0], f"📢 {message.text}"); count += 1; time.sleep(0.1)
         except: pass
     bot.reply_to(message, f"✅ ارسال به {count} نفر.")
+
+def process_bulk_charge(message):
+    if message.from_user.id != ADMIN_ID: return
+    try:
+        amount = int(message.text.strip())
+        if amount <= 0:
+            bot.reply_to(message, "❌ لطفاً یک عدد بزرگتر از صفر بفرست.")
+            return
+            
+        bot.reply_to(message, f"⏳ در حال شارژ {amount} اعتبار برای همه کاربران...")
+        
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
+        c.execute("UPDATE users SET uses = uses + ?", (amount,))
+        conn.commit()
+        c.execute("SELECT user_id FROM users")
+        users = c.fetchall()
+        conn.close()
+        
+        success_count = 0
+        for u in users:
+            try:
+                bot.send_message(u[0], f"🎁 **هدیه از طرف مدیریت!**\n\n{amount} اعتبار به حساب شما اضافه شد. 🎉", parse_mode='Markdown')
+                success_count += 1
+                time.sleep(0.05)
+            except: pass
+                
+        bot.send_message(ADMIN_ID, f"✅ شارژ همگانی انجام شد.\nاعتبار: {amount}\nپیام‌ها: {success_count}")
+    except ValueError:
+        bot.reply_to(message, "❌ لطفاً فقط یک عدد صحیح بفرست.")
 
 def process_make_gift(message):
     try:
@@ -479,6 +505,30 @@ def send_reply_to_user(message, target_user):
 # ==========================================
 # 5. دریافت ورودی‌ها
 # ==========================================
+@bot.message_handler(content_types=['photo'])
+def handle_photo(message):
+    user_id = str(message.from_user.id)
+    if "selected_plan" not in user_states.get(user_id, {}):
+        bot.reply_to(message, "⚠️ ابتدا از منو یک پلن انتخاب کنید.")
+        return
+        
+    plan_key = user_states[user_id]["selected_plan"]
+    plan = PLANS[plan_key]
+    req_id = f"{user_id}_{int(time.time())}"
+    pending_approvals[req_id] = {"user_id": user_id, "plan": plan_key}
+    
+    bot.reply_to(message, "✅ رسید دریافت شد. منتظر تایید باشید.")
+    
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        types.InlineKeyboardButton("✅ تایید", callback_data=f"admin_approve_{req_id}"),
+        types.InlineKeyboardButton("❌ رد", callback_data=f"admin_reject_{req_id}")
+    )
+    
+    bot.send_message(ADMIN_ID, f"📩 **رسید:**\nکاربر: `{user_id}`\nپلن: **{plan['name']}**", reply_markup=markup, parse_mode='Markdown')
+    bot.forward_message(ADMIN_ID, message.chat.id, message.message_id)
+    del user_states[user_id]
+
 @bot.message_handler(func=lambda message: str(message.from_user.id) in user_states)
 def process_text_inputs(message):
     user_id = str(message.from_user.id)
