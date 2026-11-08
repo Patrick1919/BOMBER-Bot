@@ -1,3 +1,7 @@
 pyTelegramBotAPI
 requests
 phonenumbers
+pyTelegramBotAPI
+requests
+phonenumbers
+Flask
