@@ -22,7 +22,7 @@ def health(): return "Bot is running!", 200
 # ==========================================
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 ADMIN_ID = 6914309071
-CARD_NUMBER = "[شماره_کارت_اینجا]" # ⚠️ شماره کارت خودت رو اینجا بذار
+CARD_NUMBER = "[شماره_کارت_اینجا]" 
 DB_FILE = "bot_database.db"
 bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
 
@@ -80,7 +80,6 @@ class Bomber:
         self.fail = 0
 
     def load_services(self):
-        # ⚠️ لیست سرویس‌ها
         self.services = [
             {'name': 'Digikala Jet', 'url': 'https://api.digikalajet.ir/user/login-register/', 'method': 'POST', 'data': lambda: {"phone": self.phone_number}, 'json': True},
         ]
@@ -143,13 +142,10 @@ def get_reply_keyboard(is_admin=False):
         types.KeyboardButton("🎁 جایزه روزانه")
     )
     markup.add(
-        types.KeyboardButton("🎲 بازی گروهی"),
-        types.KeyboardButton("🏆 برترین‌ها")
+        types.KeyboardButton("🏆 برترین‌ها"),
+        types.KeyboardButton("👑 پنل VIP")
     )
-    markup.add(
-        types.KeyboardButton("👑 پنل VIP"),
-        types.KeyboardButton("🎧 پشتیبانی")
-    )
+    markup.add(types.KeyboardButton("🎧 پشتیبانی"))
     if is_admin:
         markup.add(types.KeyboardButton("👑 پنل مدیریت"))
     return markup
@@ -201,7 +197,7 @@ def cmd_start(message):
         bot.send_message(message.chat.id, caption, reply_markup=get_reply_keyboard(is_admin), parse_mode='Markdown')
 
 # ==========================================
-# 5. سیستم بازی گروهی
+# 5. سیستم بازی گروهی (فقط با دستور)
 # ==========================================
 active_games = {}
 
@@ -296,7 +292,7 @@ def join_game(call):
     bot.edit_message_text(result_text, call.message.chat.id, call.message.message_id, parse_mode='Markdown')
 
 # ==========================================
-# 6. هندلرهای گروه
+# 6. هندلرهای گروه (با دکمه شیشه‌ای)
 # ==========================================
 @bot.message_handler(func=lambda message: message.chat.type in ['group', 'supergroup'] and message.text == "موجودی")
 def check_balance_group(message):
@@ -305,7 +301,10 @@ def check_balance_group(message):
     if not user:
         bot.reply_to(message, "❌ ابتدا در چت خصوصی /start کنید.")
         return
-    bot.reply_to(message, f"💎 **موجودی شما:**\n\n👤 نام: **{user['name']}**\n💰 الماس: **{user['diamonds']}**\n👑 پلن: **{user['plan']}**", parse_mode='Markdown')
+    text = f"💎 **موجودی شما:**\n\n👤 نام: **{user['name']}**\n💰 الماس: **{user['diamonds']}**\n👑 پلن: **{user['plan']}**"
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(types.InlineKeyboardButton("📋 مشاهده کامل پروفایل", url=f"https://t.me/{bot.get_me().username}"))
+    bot.reply_to(message, text, reply_markup=markup, parse_mode='Markdown')
 
 @bot.message_handler(func=lambda message: message.chat.type in ['group', 'supergroup'] and message.text == "راهنما")
 def group_help(message):
@@ -315,11 +314,13 @@ def group_help(message):
 def group_leaderboard(message):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute("SELECT name, diamonds FROM users ORDER BY diamonds DESC LIMIT 5")
+    c.execute("SELECT name, diamonds, user_id FROM users ORDER BY diamonds DESC LIMIT 5")
     rows = c.fetchall()
     conn.close()
     text = "🏆 **۵ کاربر برتر:**\n\n" + "".join([f"{i}. **{row[0]}** ➜ {row[1]} الماس\n" for i, row in enumerate(rows, 1)])
-    bot.reply_to(message, text, parse_mode='Markdown')
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(types.InlineKeyboardButton("📋 مشاهده پروفایل‌ها", url=f"https://t.me/{bot.get_me().username}"))
+    bot.reply_to(message, text, reply_markup=markup, parse_mode='Markdown')
 
 @bot.message_handler(func=lambda message: message.chat.type in ['group', 'supergroup'] and message.text == "دعوت‌کنندگان")
 def group_top_inviters(message):
@@ -329,7 +330,9 @@ def group_top_inviters(message):
     rows = c.fetchall()
     conn.close()
     text = "👥 **۵ دعوت‌کننده برتر:**\n\n" + "".join([f"{i}. **{row[0]}** ➜ {row[1]} دعوت\n" for i, row in enumerate(rows, 1)])
-    bot.reply_to(message, text, parse_mode='Markdown')
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(types.InlineKeyboardButton("📋 مشاهده پروفایل‌ها", url=f"https://t.me/{bot.get_me().username}"))
+    bot.reply_to(message, text, reply_markup=markup, parse_mode='Markdown')
 
 # ==========================================
 # 7. هندلرهای دکمه‌های پایین صفحه
@@ -373,15 +376,11 @@ def kb_daily(message):
         save_user(**user)
         bot.reply_to(message, "🎉 ۲ الماس رایگان!")
 
-@bot.message_handler(func=lambda message: message.text == "🎲 بازی گروهی")
-def kb_game(message):
-    bot.reply_to(message, "🎲 برای ساخت بازی، در گروه بنویسید: `بازی [مبلغ]`\nمثال: `بازی 500`", parse_mode='Markdown')
-
 @bot.message_handler(func=lambda message: message.text == "🏆 برترین‌ها")
 def kb_leaderboard(message):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute("SELECT name, diamonds FROM users ORDER BY diamonds DESC LIMIT 5")
+    c.execute("SELECT name, diamonds, user_id FROM users ORDER BY diamonds DESC LIMIT 5")
     rows = c.fetchall()
     conn.close()
     text = "🏆 **۵ کاربر برتر:**\n\n" + "".join([f"{i}. **{row[0]}** ➜ {row[1]} الماس\n" for i, row in enumerate(rows, 1)])
