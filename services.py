@@ -1,3 +1,4 @@
+phone = "+989120000000"
 SERVICES_LIST = [
     {'name': 'Digikala Jet', 'url': 'https://api.digikalajet.ir/user/login-register/', 'method': 'POST', 'data': lambda phone: {"phone": phone}, 'json': True},
     {'name': 'Limoome', 'url': 'https://my.limoome.com/api/auth/login/otp', 'method': 'POST', 'data': lambda phone: {"mobileNumber": phone.split("+98")[1], "country": "1"}, 'json': False},
