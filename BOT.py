@@ -21,7 +21,7 @@ def health(): return "Bot is running!", 200
 # ==========================================
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 ADMIN_ID = 6914309071
-CARD_NUMBER = "[شماره_کارت_اینجا]" # ⚠️ شماره کارت خودت رو اینجا بذار
+CARD_NUMBER = "[شماره_کارت_اینجا]" 
 DB_FILE = "bot_database.db"
 bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
 
@@ -56,12 +56,7 @@ def save_user(user_id, name, plan, diamonds, last_daily, sub_expiry, daily_bomb_
     conn.commit()
     conn.close()
 
-# دیکشنری‌های وضعیت
-user_states = {} # برای نگهداری وضعیت کاربران (خرید، شماره، پشتیبانی)
-admin_states = {} # برای نگهداری وضعیت ادمین (شارژ، کسر، پیام)
-pending_approvals = {}
-active_bombers = {}
-active_gift_codes = {}
+user_states, pending_approvals, active_bombers, active_gift_codes = {}, {}, {}, {}
 
 PLANS = {
     "basic": {"name": "الماس ۱۰۰ عددی", "price": 150, "diamonds": 100},
@@ -84,7 +79,6 @@ class Bomber:
         self.fail = 0
 
     def load_services(self):
-        # ⚠️ لیست سرویس‌ها
         self.services = [
             {'name': 'Digikala Jet', 'url': 'https://api.digikalajet.ir/user/login-register/', 'method': 'POST', 'data': lambda: {"phone": self.phone_number}, 'json': True},
         ]
@@ -529,31 +523,26 @@ def handle_callbacks(call):
 
     elif call.data == "admin_broadcast" and call.from_user.id == ADMIN_ID:
         bot.answer_callback_query(call.id)
-        admin_states[user_id] = {"state": "waiting_for_broadcast"}
         msg = bot.send_message(call.message.chat.id, "📝 متن پیام:")
         bot.register_next_step_handler(msg, send_broadcast)
 
     elif call.data == "admin_bulk_charge" and call.from_user.id == ADMIN_ID:
         bot.answer_callback_query(call.id)
-        admin_states[user_id] = {"state": "waiting_for_charge_amount"}
         msg = bot.send_message(call.message.chat.id, "🎁 چند الماس به همه کاربران اضافه کنم؟ (فقط عدد):")
         bot.register_next_step_handler(msg, process_bulk_charge)
 
     elif call.data == "admin_bulk_deduct" and call.from_user.id == ADMIN_ID:
         bot.answer_callback_query(call.id)
-        admin_states[user_id] = {"state": "waiting_for_deduct_amount"}
         msg = bot.send_message(call.message.chat.id, "📉 چند الماس از همه کاربران کم کنم؟ (فقط عدد):")
         bot.register_next_step_handler(msg, process_bulk_deduct)
 
     elif call.data == "admin_gifts" and call.from_user.id == ADMIN_ID:
         bot.answer_callback_query(call.id)
-        admin_states[user_id] = {"state": "waiting_for_gift_code"}
         msg = bot.send_message(call.message.chat.id, "🔑 فرمت: `CODE DIAMONDS` (مثال: `WELCOME 10`):")
         bot.register_next_step_handler(msg, process_make_gift)
 
     elif call.data == "admin_view_user" and call.from_user.id == ADMIN_ID:
         bot.answer_callback_query(call.id)
-        admin_states[user_id] = {"state": "waiting_for_user_id"}
         msg = bot.send_message(call.message.chat.id, "🆔 آیدی عددی کاربر:")
         bot.register_next_step_handler(msg, view_user_admin)
 
@@ -565,4 +554,36 @@ def handle_callbacks(call):
 
     elif call.data.startswith("admin_reply_") and call.from_user.id == ADMIN_ID:
         target_user = call.data.replace("admin_reply_", "")
-        admin
+        msg = bot.send_message(call.message.chat.id, "پاسخ خود را بنویسید:")
+        bot.register_next_step_handler(msg, lambda m: send_reply_to_user(m, target_user))
+
+    elif call.data.startswith("admin_approve_"):
+        req_id = call.data.replace("admin_approve_", "")
+        if req_id in pending_approvals:
+            data = pending_approvals[req_id]
+            uid, plan_key = data["user_id"], data["plan"]
+            plan = PLANS[plan_key]
+            user_data = get_user(uid)
+            if user_data:
+                user_data["diamonds"] += plan["diamonds"]
+                user_data["total_purchases"] += 1
+                save_user(**user_data)
+                bot.send_message(uid, f"💎 **پرداخت تایید شد!**\n**{plan['diamonds']}** الماس به حساب شما اضافه شد.", parse_mode='Markdown')
+            bot.edit_message_text(f"✅ تایید شد.", call.message.chat.id, call.message.message_id)
+            del pending_approvals[req_id]
+
+    elif call.data.startswith("admin_reject_"):
+        req_id = call.data.replace("admin_reject_", "")
+        if req_id in pending_approvals:
+            uid = pending_approvals[req_id]["user_id"]
+            bot.edit_message_text("❌ رد شد.", call.message.chat.id, call.message.message_id)
+            bot.send_message(uid, "❌ رسید شما رد شد.")
+            del pending_approvals[req_id]
+
+# ==========================================
+# 9. توابع کمکی و دریافت ورودی‌ها
+# ==========================================
+def send_broadcast(message):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c
