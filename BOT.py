@@ -10,7 +10,12 @@ from flask import Flask
 from datetime import datetime
 import traceback
 
-# ⚠️ لیست سرویس‌ها از فایل جداگانه ایمپورت میشه
+# ==========================================
+# ⚠️ تعریف متغیر phone قبل از ایمپورت لیست سرویس‌ها
+# این کار باعث میشه خطای NameError رخ نده
+# ==========================================
+phone = "+989120000000" 
+
 from services import SERVICES_LIST
 
 # ==========================================
@@ -29,12 +34,12 @@ threading.Thread(target=run_web, daemon=True).start()
 # ==========================================
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 ADMIN_ID = 6914309071
-CARD_NUMBER = "[شماره_کارت_اینجا]" # ⚠️ شماره کارت خودت رو اینجا بذار
+CARD_NUMBER = "621986145105296" 
 DB_FILE = "bot_database.db"
 bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
 
 PANEL_IMAGE_URL = "https://i.imgur.com/Z7lvgzO.jpeg"
-CHANNEL_1 = "@BloodBomber_Chanel" # ⚠️ نام کانال خودت رو اینجا بذار
+CHANNEL_1 = "@BloodBomber_Chanel"
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
@@ -92,7 +97,7 @@ def send_join_message(chat_id):
     bot.send_message(chat_id, "⚠️ **برای استفاده از ربات، ابتدا باید در کانال ما عضو شوید!**", reply_markup=markup, parse_mode='Markdown')
 
 # ==========================================
-# 3. هسته بمبر (با نوار وضعیت زنده)
+# 3. هسته بمبر (با نوار وضعیت)
 # ==========================================
 class Bomber:
     def __init__(self, phone_number, user_id):
@@ -142,7 +147,6 @@ class Bomber:
         if not self.phone_number.startswith("+"): 
             self.phone_number = "+98" + self.phone_number.lstrip("0")
 
-        # ارسال پیام نوار وضعیت اولیه
         status_msg = bot.send_message(self.user_id, f"⏳ **در حال ارسال...**\nمیزان پیشرفت: 0/{self.total_services}", parse_mode='Markdown')
         
         chunks = [self.services[i:i + chunk_size] for i in range(0, self.total_services, chunk_size)]
@@ -151,11 +155,10 @@ class Bomber:
             t.start()
             threads.append(t)
                 
-        # آپدیت زنده نوار وضعیت
         def update_status():
             last_update = time.time()
             while any(t.is_alive() for t in threads):
-                if time.time() - last_update > 2: # هر ۲ ثانیه آپدیت شود
+                if time.time() - last_update > 2:
                     done = self.success + self.fail
                     percent = int((done / self.total_services) * 100) if self.total_services > 0 else 0
                     bar = "█" * (percent // 10) + "░" * (10 - (percent // 10))
@@ -364,9 +367,6 @@ def handle_callbacks(call):
             bot.send_message(uid, "❌ رسید شما رد شد.")
             del pending_approvals[req_id]
 
-# ==========================================
-# 5. دریافت ورودی‌ها
-# ==========================================
 @bot.message_handler(content_types=['photo'])
 def handle_photo(message):
     user_id = str(message.from_user.id)
