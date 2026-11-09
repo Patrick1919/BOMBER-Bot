@@ -35,7 +35,8 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS users (
         user_id TEXT PRIMARY KEY, name TEXT, plan TEXT, diamonds INTEGER, 
         last_daily REAL, sub_expiry REAL, daily_bomb_count INTEGER, last_bomb_date TEXT,
-        total_purchases INTEGER DEFAULT 0, invites INTEGER DEFAULT 0)''')
+        total_purchases INTEGER DEFAULT 0, invites INTEGER DEFAULT 0,
+        level INTEGER DEFAULT 1, xp INTEGER DEFAULT 0, last_wheel_spin REAL DEFAULT 0)''')
     conn.commit()
     conn.close()
 init_db()
@@ -46,16 +47,31 @@ def get_user(user_id):
     c.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
     row = c.fetchone()
     conn.close()
-    if row: return {"user_id": row[0], "name": row[1], "plan": row[2], "diamonds": row[3], "last_daily": row[4], "sub_expiry": row[5], "daily_bomb_count": row[6], "last_bomb_date": row[7], "total_purchases": row[8], "invites": row[9]}
+    if row: return {"user_id": row[0], "name": row[1], "plan": row[2], "diamonds": row[3], "last_daily": row[4], "sub_expiry": row[5], "daily_bomb_count": row[6], "last_bomb_date": row[7], "total_purchases": row[8], "invites": row[9], "level": row[10], "xp": row[11], "last_wheel_spin": row[12]}
     return None
 
-def save_user(user_id, name, plan, diamonds, last_daily, sub_expiry, daily_bomb_count, last_bomb_date, total_purchases=0, invites=0):
+def save_user(user_id, name, plan, diamonds, last_daily, sub_expiry, daily_bomb_count, last_bomb_date, total_purchases=0, invites=0, level=1, xp=0, last_wheel_spin=0):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute("INSERT OR REPLACE INTO users VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", 
-              (user_id, name, plan, diamonds, last_daily, sub_expiry, daily_bomb_count, last_bomb_date, total_purchases, invites))
+    c.execute("INSERT OR REPLACE INTO users VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", 
+              (user_id, name, plan, diamonds, last_daily, sub_expiry, daily_bomb_count, last_bomb_date, total_purchases, invites, level, xp, last_wheel_spin))
     conn.commit()
     conn.close()
+
+def add_xp(user_id, amount):
+    user = get_user(user_id)
+    if not user: return
+    user['xp'] += amount
+    xp_needed = user['level'] * 100
+    if user['xp'] >= xp_needed:
+        user['level'] += 1
+        user['xp'] -= xp_needed
+        user['diamonds'] += 10 # جایزه لول آپ
+        save_user(**user)
+        try: bot.send_message(user_id, f"🎉 **تبریک! لول آپ کردی!**\nسطح جدید: **{user['level']}**\nهدیه: ۱۰ الماس", parse_mode='Markdown')
+        except: pass
+    else:
+        save_user(**user)
 
 user_states, pending_approvals, active_bombers, active_gift_codes = {}, {}, {}, {}
 
@@ -142,10 +158,13 @@ def get_reply_keyboard(is_admin=False):
         types.KeyboardButton("🎁 جایزه روزانه")
     )
     markup.add(
-        types.KeyboardButton("🏆 برترین‌ها"),
-        types.KeyboardButton("👑 پنل VIP")
+        types.KeyboardButton("🎰 گردونه شانس"),
+        types.KeyboardButton("🏆 برترین‌ها")
     )
-    markup.add(types.KeyboardButton("🎧 پشتیبانی"))
+    markup.add(
+        types.KeyboardButton("👑 پنل VIP"),
+        types.KeyboardButton("🎧 پشتیبانی")
+    )
     if is_admin:
         markup.add(types.KeyboardButton("👑 پنل مدیریت"))
     return markup
@@ -161,9 +180,10 @@ def get_main_menu():
         types.InlineKeyboardButton("📋 حساب کاربری", callback_data="menu_profile")
     )
     markup.add(
-        types.InlineKeyboardButton("🏆 برترین‌ها", callback_data="menu_leaderboard"),
-        types.InlineKeyboardButton("👥 برترین دعوت‌کنندگان", callback_data="menu_top_inviters")
+        types.InlineKeyboardButton("🎰 گردونه شانس", callback_data="menu_wheel"),
+        types.InlineKeyboardButton("🏆 برترین‌ها", callback_data="menu_leaderboard")
     )
+    markup.add(types.InlineKeyboardButton("👥 برترین دعوت‌کنندگان", callback_data="menu_top_inviters"))
     markup.add(types.InlineKeyboardButton("👑 پنل VIP (۱۰۰۰ الماس)", callback_data="menu_vip_club"))
     markup.add(types.InlineKeyboardButton("🎧 پشتیبانی", callback_data="menu_support"))
     markup.add(types.InlineKeyboardButton("🔑 کد هدیه", callback_data="menu_gift"))
@@ -183,21 +203,22 @@ def cmd_start(message):
                 inviter["invites"] += 1
                 inviter["diamonds"] += 5
                 save_user(**inviter)
+                add_xp(inviter_id, 50) # XP برای دعوت
                 try: bot.send_message(inviter_id, f"🎉 یک نفر با لینک شما وارد شد! ۵ الماس هدیه گرفتید.")
                 except: pass
 
     if not user:
-        save_user(user_id, message.from_user.first_name, "none", 0, 0, 0, 0, "2000-01-01", 0, 0)
+        save_user(user_id, message.from_user.first_name, "none", 0, 0, 0, 0, "2000-01-01", 0, 0, 1, 0, 0)
         
     is_admin = (message.from_user.id == ADMIN_ID)
-    caption = f"سلام {message.from_user.first_name}! 👋\nبه ربات **VoidSMSBomber** خوش آمدید."
+    caption = f"سلام {message.from_user.first_name}! 👋\nبه ربات **VoidSMSBomber** خوش آمدید.\nسطح شما: {user['level']} | XP: {user['xp']}"
     try:
         bot.send_photo(message.chat.id, PANEL_IMAGE_URL, caption=caption, reply_markup=get_reply_keyboard(is_admin), parse_mode='Markdown')
     except:
         bot.send_message(message.chat.id, caption, reply_markup=get_reply_keyboard(is_admin), parse_mode='Markdown')
 
 # ==========================================
-# 5. سیستم بازی گروهی (فقط با دستور)
+# 5. سیستم بازی گروهی (با XP)
 # ==========================================
 active_games = {}
 
@@ -223,7 +244,7 @@ def create_game(message):
         bot.reply_to(message, f"❌ الماس کافی ندارید! (الماس شما: {user['diamonds']})")
         return
     text = (
-        f"🎲 **بازی شرطی جدید!**\n\n"
+        f"⚔️ **دوئل الماسی!**\n\n"
         f"👤 سازنده: **{user['name']}**\n"
         f"💎 مبلغ شرط: **{amount} الماس**\n\n"
         f"⏳ منتظر حریف...\n"
@@ -279,9 +300,10 @@ def join_game(call):
     loser = challenger if winner['user_id'] == accepter_id else accepter
     winner['diamonds'] += (amount * 2)
     save_user(**winner)
+    add_xp(winner['user_id'], 20) # XP برای برد
     del active_games[message_id]
     result_text = (
-        f"🏆 **نتیجه بازی!**\n\n"
+        f"🏆 **نتیجه دوئل!**\n\n"
         f"👤 بازیکن ۱: **{challenger['name']}**\n"
         f"🤝 بازیکن ۲: **{accepter['name']}**\n"
         f"💎 شرط: **{amount} الماس**\n\n"
@@ -292,7 +314,7 @@ def join_game(call):
     bot.edit_message_text(result_text, call.message.chat.id, call.message.message_id, parse_mode='Markdown')
 
 # ==========================================
-# 6. هندلرهای گروه (با دکمه شیشه‌ای)
+# 6. هندلرهای گروه
 # ==========================================
 @bot.message_handler(func=lambda message: message.chat.type in ['group', 'supergroup'] and message.text == "موجودی")
 def check_balance_group(message):
@@ -301,7 +323,7 @@ def check_balance_group(message):
     if not user:
         bot.reply_to(message, "❌ ابتدا در چت خصوصی /start کنید.")
         return
-    text = f"💎 **موجودی شما:**\n\n👤 نام: **{user['name']}**\n💰 الماس: **{user['diamonds']}**\n👑 پلن: **{user['plan']}**"
+    text = f"💎 **موجودی شما:**\n\n👤 نام: **{user['name']}**\n💰 الماس: **{user['diamonds']}**\n👑 پلن: **{user['plan']}**\n📈 سطح: **{user['level']}**"
     markup = types.InlineKeyboardMarkup(row_width=1)
     markup.add(types.InlineKeyboardButton("📋 مشاهده کامل پروفایل", url=f"https://t.me/{bot.get_me().username}"))
     bot.reply_to(message, text, reply_markup=markup, parse_mode='Markdown')
@@ -361,7 +383,7 @@ def kb_profile(message):
     user_id = str(message.from_user.id)
     user = get_user(user_id)
     plan_name = PLANS.get(user['plan'], {}).get('name', "بدون پلن")
-    text = f"📋 **پروفایل:**\n\n👤 نام: {user['name']}\n💎 الماس: **{user['diamonds']}**\n👑 پلن: **{plan_name}**\n👥 دعوت‌ها: **{user['invites']}**"
+    text = f"📋 **پروفایل:**\n\n👤 نام: {user['name']}\n💎 الماس: **{user['diamonds']}**\n👑 پلن: **{plan_name}**\n👥 دعوت‌ها: **{user['invites']}**\n📈 سطح: **{user['level']}** | XP: **{user['xp']}**"
     bot.reply_to(message, text, parse_mode='Markdown')
 
 @bot.message_handler(func=lambda message: message.text == "🎁 جایزه روزانه")
@@ -374,7 +396,22 @@ def kb_daily(message):
         user['diamonds'] += 2
         user['last_daily'] = time.time()
         save_user(**user)
+        add_xp(user_id, 10) # XP برای جایزه روزانه
         bot.reply_to(message, "🎉 ۲ الماس رایگان!")
+
+@bot.message_handler(func=lambda message: message.text == "🎰 گردونه شانس")
+def kb_wheel(message):
+    user_id = str(message.from_user.id)
+    user = get_user(user_id)
+    if time.time() - user['last_wheel_spin'] < 86400:
+        bot.reply_to(message, "⏳ شما امروز گردونه را چرخانده‌اید! فردا دوباره بیایید.")
+        return
+    prize = random.choice([1, 2, 5, 10, 20, 50])
+    user['diamonds'] += prize
+    user['last_wheel_spin'] = time.time()
+    save_user(**user)
+    add_xp(user_id, 15)
+    bot.reply_to(message, f"🎉 **تبریک!** شما **{prize}** الماس از گردونه شانس برنده شدید! 🎰")
 
 @bot.message_handler(func=lambda message: message.text == "🏆 برترین‌ها")
 def kb_leaderboard(message):
@@ -441,7 +478,7 @@ def handle_callbacks(call):
 
     elif call.data == "menu_profile":
         plan_name = PLANS.get(user['plan'], {}).get('name', "بدون پلن")
-        text = f"📋 **پروفایل:**\n\n👤 نام: {user['name']}\n💎 الماس: **{user['diamonds']}**\n👑 پلن: **{plan_name}**\n👥 تعداد دعوت: **{user['invites']}**"
+        text = f"📋 **پروفایل:**\n\n👤 نام: {user['name']}\n💎 الماس: **{user['diamonds']}**\n👑 پلن: **{plan_name}**\n👥 تعداد دعوت: **{user['invites']}**\n📈 سطح: **{user['level']}** | XP: **{user['xp']}**"
         markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="menu_back"))
         bot.edit_message_caption(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
 
@@ -462,7 +499,19 @@ def handle_callbacks(call):
             user['diamonds'] += 2
             user['last_daily'] = time.time()
             save_user(**user)
+            add_xp(user_id, 10)
             bot.answer_callback_query(call.id, "🎉 ۲ الماس رایگان!", show_alert=True)
+
+    elif call.data == "menu_wheel":
+        if time.time() - user['last_wheel_spin'] < 86400:
+            bot.answer_callback_query(call.id, "⏳ امروز چرخانده‌اید!", show_alert=True)
+        else:
+            prize = random.choice([1, 2, 5, 10, 20, 50])
+            user['diamonds'] += prize
+            user['last_wheel_spin'] = time.time()
+            save_user(**user)
+            add_xp(user_id, 15)
+            bot.answer_callback_query(call.id, f"🎉 {prize} الماس برنده شدید!", show_alert=True)
 
     elif call.data == "menu_gift":
         user_states[user_id] = {"state": "waiting_for_gift"}
@@ -643,7 +692,7 @@ def view_user_admin(message):
     uid = message.text.strip()
     user = get_user(uid)
     if user:
-        bot.reply_to(message, f"👤 {user['name']}\n💎 {user['plan']}\n💎 {user['diamonds']} الماس")
+        bot.reply_to(message, f"👤 {user['name']}\n💎 {user['plan']}\n💎 {user['diamonds']} الماس\n📈 لول: {user['level']} (XP: {user['xp']})")
     else: bot.reply_to(message, "❌ کاربر یافت نشد.")
 
 def send_reply_to_user(message, target_user):
