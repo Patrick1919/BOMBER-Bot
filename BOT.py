@@ -751,25 +751,53 @@ def process_text_inputs(message):
         bot.reply_to(message, "✅ پیام ارسال شد.")
         del user_states[user_id]
 
-    elif state == "waiting_for_ai":
+        elif state == "waiting_for_ai":
         del user_states[user_id]
-        q = message.text.lower()
-        answer = "متاسفم، پاسخ این سوال را نمی‌دانم. لطفاً با پشتیبانی در ارتباط باشید."
         
-        if "خرید" in q or "اعتبار" in q:
-            answer = "برای خرید اعتبار، از دکمه '💳 خرید اعتبار' استفاده کنید. پلن مورد نظر را انتخاب کرده و پس از واریز، رسید را ارسال کنید."
-        elif "بمبر" in q or "ارسال" in q or "پیام" in q:
-            answer = "برای اجرای بمبر، از دکمه‌های '🆓 اجرای رایگان' یا '💎 اجرای اشتراکی' استفاده کنید. سپس شماره هدف را وارد کنید."
-        elif "vip" in q or "ویژه" in q:
-            answer = "پلن VIP با ۱۰۰۰ اعتبار به شما امکان می‌دهد تا ۱۰ شماره را با سرعت بالا بمباران کنید. از دکمه '👑 پنل VIP' استفاده کنید."
-        elif "دعوت" in q or "زیرمجموعه" in q:
-            answer = "با دستور /invite لینک اختصاصی خود را دریافت کنید. هر نفر که با لینک شما وارد شود، ۵ اعتبار هدیه می‌گیرید."
-        elif "شانس" in q or "گردونه" in q:
-            answer = "هر ۲۴ ساعت یک بار می‌توانید گردونه شانس را بچرخانید و بین ۱ تا ۵۰ اعتبار برنده شوید."
-        elif "جوین" in q or "عضویت" in q:
-            answer = "برای استفاده از ربات باید در کانال‌های ما عضو شوید. پس از عضویت، دکمه '✅ عضو شدم' را بزنید."
+        # ⚠️ کلید API جدید خود را اینجا بگذارید (کلید قبلی را Revoke کنید)
+        GAPGPT_API_KEY = "sk-aWbjXFjWZuuk551WcnHj8lP6Kx3Yu1aRPIrIUGdc6iCoWWSX"
+        
+        # دستور سیستم برای محدود کردن ربات به موضوعات مربوطه
+        system_prompt = (
+            "تو دستیار هوش مصنوعی ربات Blood-Bomber هستی. "
+            "وظیفه تو فقط و فقط پاسخ دادن به سوالات کاربران درباره این ربات است. "
+            "موضوعاتی که می‌توانی درباره آنها صحبت کنی: "
+            "نحوه خرید اعتبار، نحوه اجرای بمبر (رایگان و اشتراکی)، "
+            "پلن‌های VIP، نحوه دعوت از دوستان، گردونه شانس، و هر چیز دیگری که مستقیماً به این ربات مربوط می‌شود. "
+            "اگر کاربر سوالی خارج از این موضوعات پرسید، مودبانه بگو که فقط می‌توانی در مورد ربات Blood-Bomber کمک کنی. "
+            "پاسخ‌هایت باید کوتاه، مفید و به زبان فارسی باشد."
+        )
+
+        try:
+            # آدرس API برای GapGPT (در صورت استفاده از سرویس دیگر، این آدرس را تغییر دهید)
+            url = "https://api.gapgpt.app/v1/chat/completions"
+            headers = {
+                "Authorization": f"Bearer {GAPGPT_API_KEY}",
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "model": "gpt-4o-mini", # یا هر مدلی که در سرویس شما پشتیبانی می‌شود
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": message.text}
+                ],
+                "temperature": 0.3,
+                "max_tokens": 500
+            }
             
-        bot.reply_to(message, f"🤖 **پاسخ هوش مصنوعی:**\n\n{answer}", parse_mode='Markdown')
+            response = requests.post(url, json=payload, headers=headers, timeout=15)
+            
+            if response.status_code == 200:
+                data = response.json()
+                answer = data['choices'][0]['message']['content']
+                bot.reply_to(message, f"🤖 **پاسخ هوش مصنوعی:**\n\n{answer}", parse_mode='Markdown')
+            else:
+                print(f"AI API Error: {response.text}")
+                bot.reply_to(message, "❌ متاسفانه در حال حاضر نمی‌توانم به هوش مصنوعی وصل شوم.")
+                
+        except Exception as e:
+            print(f"AI Connection Error: {e}")
+            bot.reply_to(message, "❌ خطا در ارتباط با هوش مصنوعی.")
 
     elif state == "waiting_for_phone":
         phones = message.text.strip().replace(" ", "").split(",")
