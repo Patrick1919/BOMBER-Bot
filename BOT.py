@@ -26,6 +26,14 @@ CARD_NUMBER = "[شماره_کارت_اینجا]" # ⚠️ شماره کارت خ
 DB_FILE = "bot_database.db"
 bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
 
+# تنظیم دستورات منوی تلگرام (خودکار)
+bot.set_my_commands([
+    types.BotCommand("start", "شروع ربات و دریافت منو"),
+    types.BotCommand("admin", "پنل مدیریت (فقط ادمین)"),
+    types.BotCommand("invite", "دریافت لینک دعوت اختصاصی"),
+    types.BotCommand("help", "راهنمای ربات")
+])
+
 PANEL_IMAGE_URL = "https://i.imgur.com/Z7lvgzO.jpeg"
 VIP_COST = 1000
 WHEEL_COOLDOWN = 86400 # 24 ساعت
