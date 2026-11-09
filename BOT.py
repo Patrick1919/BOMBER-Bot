@@ -22,21 +22,22 @@ def health(): return "Bot is running!", 200
 # ==========================================
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 ADMIN_ID = 6914309071
-CARD_NUMBER = "[شماره_کارت_اینجا]" 
+CARD_NUMBER = "[شماره_کارت_اینجا]" # ⚠️ شماره کارت خودت رو اینجا بذار
 DB_FILE = "bot_database.db"
 bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
 
 PANEL_IMAGE_URL = "https://i.imgur.com/Z7lvgzO.jpeg"
-VIP_DIAMOND_COST = 1000
+VIP_COST = 1000
+WHEEL_COOLDOWN = 86400 # 24 ساعت
 
 def init_db():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS users (
-        user_id TEXT PRIMARY KEY, name TEXT, plan TEXT, diamonds INTEGER, 
+        user_id TEXT PRIMARY KEY, name TEXT, plan TEXT, credits INTEGER, 
         last_daily REAL, sub_expiry REAL, daily_bomb_count INTEGER, last_bomb_date TEXT,
         total_purchases INTEGER DEFAULT 0, invites INTEGER DEFAULT 0,
-        level INTEGER DEFAULT 1, xp INTEGER DEFAULT 0, last_wheel_spin REAL DEFAULT 0)''')
+        last_wheel_spin REAL DEFAULT 0)''')
     conn.commit()
     conn.close()
 init_db()
@@ -47,38 +48,23 @@ def get_user(user_id):
     c.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
     row = c.fetchone()
     conn.close()
-    if row: return {"user_id": row[0], "name": row[1], "plan": row[2], "diamonds": row[3], "last_daily": row[4], "sub_expiry": row[5], "daily_bomb_count": row[6], "last_bomb_date": row[7], "total_purchases": row[8], "invites": row[9], "level": row[10], "xp": row[11], "last_wheel_spin": row[12]}
+    if row: return {"user_id": row[0], "name": row[1], "plan": row[2], "credits": row[3], "last_daily": row[4], "sub_expiry": row[5], "daily_bomb_count": row[6], "last_bomb_date": row[7], "total_purchases": row[8], "invites": row[9], "last_wheel_spin": row[10]}
     return None
 
-def save_user(user_id, name, plan, diamonds, last_daily, sub_expiry, daily_bomb_count, last_bomb_date, total_purchases=0, invites=0, level=1, xp=0, last_wheel_spin=0):
+def save_user(user_id, name, plan, credits, last_daily, sub_expiry, daily_bomb_count, last_bomb_date, total_purchases=0, invites=0, last_wheel_spin=0):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute("INSERT OR REPLACE INTO users VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", 
-              (user_id, name, plan, diamonds, last_daily, sub_expiry, daily_bomb_count, last_bomb_date, total_purchases, invites, level, xp, last_wheel_spin))
+    c.execute("INSERT OR REPLACE INTO users VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", 
+              (user_id, name, plan, credits, last_daily, sub_expiry, daily_bomb_count, last_bomb_date, total_purchases, invites, last_wheel_spin))
     conn.commit()
     conn.close()
-
-def add_xp(user_id, amount):
-    user = get_user(user_id)
-    if not user: return
-    user['xp'] += amount
-    xp_needed = user['level'] * 100
-    if user['xp'] >= xp_needed:
-        user['level'] += 1
-        user['xp'] -= xp_needed
-        user['diamonds'] += 10 # جایزه لول آپ
-        save_user(**user)
-        try: bot.send_message(user_id, f"🎉 **تبریک! لول آپ کردی!**\nسطح جدید: **{user['level']}**\nهدیه: ۱۰ الماس", parse_mode='Markdown')
-        except: pass
-    else:
-        save_user(**user)
 
 user_states, pending_approvals, active_bombers, active_gift_codes = {}, {}, {}, {}
 
 PLANS = {
-    "basic": {"name": "الماس ۱۰۰ عددی", "price": 150, "diamonds": 100},
-    "pro": {"name": "الماس ۵۰۰ عددی", "price": 450, "diamonds": 500},
-    "vip": {"name": "الماس ۱۲۰۰ عددی", "price": 600, "diamonds": 1200}
+    "basic": {"name": "اعتبار ۱۰۰ عددی", "price": 150, "credits": 100},
+    "pro": {"name": "اعتبار ۵۰۰ عددی", "price": 450, "credits": 500},
+    "vip": {"name": "اعتبار ۱۲۰۰ عددی", "price": 600, "credits": 1200}
 }
 
 # ==========================================
@@ -151,20 +137,18 @@ def get_reply_keyboard(is_admin=False):
     markup = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
     markup.add(
         types.KeyboardButton("🚀 اجرای بمبر"),
-        types.KeyboardButton("💎 خرید الماس")
-    )
-    markup.add(
-        types.KeyboardButton("📋 حساب کاربری"),
-        types.KeyboardButton("🎁 جایزه روزانه")
+        types.KeyboardButton("💳 خرید اعتبار")
     )
     markup.add(
         types.KeyboardButton("🎰 گردونه شانس"),
-        types.KeyboardButton("🏆 برترین‌ها")
+        types.KeyboardButton("📋 حساب کاربری")
     )
     markup.add(
-        types.KeyboardButton("👑 پنل VIP"),
-        types.KeyboardButton("🎧 پشتیبانی")
+        types.KeyboardButton("🎁 جایزه روزانه"),
+        types.KeyboardButton("🏆 برترین‌ها")
     )
+    markup.add(types.KeyboardButton("👑 پنل VIP"))
+    markup.add(types.KeyboardButton("🎧 پشتیبانی"))
     if is_admin:
         markup.add(types.KeyboardButton("👑 پنل مدیریت"))
     return markup
@@ -173,18 +157,18 @@ def get_main_menu():
     markup = types.InlineKeyboardMarkup(row_width=2)
     markup.add(
         types.InlineKeyboardButton("🚀 اجرای بمبر", callback_data="menu_bomb"),
-        types.InlineKeyboardButton("💎 خرید الماس", callback_data="menu_buy")
-    )
-    markup.add(
-        types.InlineKeyboardButton("🎁 جایزه روزانه", callback_data="menu_daily"),
-        types.InlineKeyboardButton("📋 حساب کاربری", callback_data="menu_profile")
+        types.InlineKeyboardButton("💳 خرید اعتبار", callback_data="menu_buy")
     )
     markup.add(
         types.InlineKeyboardButton("🎰 گردونه شانس", callback_data="menu_wheel"),
+        types.InlineKeyboardButton("🎁 جایزه روزانه", callback_data="menu_daily")
+    )
+    markup.add(
+        types.InlineKeyboardButton("📋 حساب کاربری", callback_data="menu_profile"),
         types.InlineKeyboardButton("🏆 برترین‌ها", callback_data="menu_leaderboard")
     )
     markup.add(types.InlineKeyboardButton("👥 برترین دعوت‌کنندگان", callback_data="menu_top_inviters"))
-    markup.add(types.InlineKeyboardButton("👑 پنل VIP (۱۰۰۰ الماس)", callback_data="menu_vip_club"))
+    markup.add(types.InlineKeyboardButton("👑 پنل VIP (۱۰۰۰ اعتبار)", callback_data="menu_vip_club"))
     markup.add(types.InlineKeyboardButton("🎧 پشتیبانی", callback_data="menu_support"))
     markup.add(types.InlineKeyboardButton("🔑 کد هدیه", callback_data="menu_gift"))
     return markup
@@ -201,120 +185,23 @@ def cmd_start(message):
             inviter = get_user(inviter_id)
             if inviter:
                 inviter["invites"] += 1
-                inviter["diamonds"] += 5
+                inviter["credits"] += 5
                 save_user(**inviter)
-                add_xp(inviter_id, 50) # XP برای دعوت
-                try: bot.send_message(inviter_id, f"🎉 یک نفر با لینک شما وارد شد! ۵ الماس هدیه گرفتید.")
+                try: bot.send_message(inviter_id, f"🎉 یک نفر با لینک شما وارد شد! ۵ اعتبار هدیه گرفتید.")
                 except: pass
 
     if not user:
-        save_user(user_id, message.from_user.first_name, "none", 0, 0, 0, 0, "2000-01-01", 0, 0, 1, 0, 0)
+        save_user(user_id, message.from_user.first_name, "none", 0, 0, 0, 0, "2000-01-01", 0, 0, 0)
         
     is_admin = (message.from_user.id == ADMIN_ID)
-    caption = f"سلام {message.from_user.first_name}! 👋\nبه ربات **VoidSMSBomber** خوش آمدید.\nسطح شما: {user['level']} | XP: {user['xp']}"
+    caption = f"سلام {message.from_user.first_name}! 👋\nبه ربات **VoidSMSBomber** خوش آمدید."
     try:
         bot.send_photo(message.chat.id, PANEL_IMAGE_URL, caption=caption, reply_markup=get_reply_keyboard(is_admin), parse_mode='Markdown')
     except:
         bot.send_message(message.chat.id, caption, reply_markup=get_reply_keyboard(is_admin), parse_mode='Markdown')
 
 # ==========================================
-# 5. سیستم بازی گروهی (با XP)
-# ==========================================
-active_games = {}
-
-@bot.message_handler(func=lambda message: message.chat.type in ['group', 'supergroup'] and message.text.startswith("بازی "))
-def create_game(message):
-    try:
-        amount = int(message.text.split()[1])
-        if amount < 10:
-            bot.reply_to(message, "❌ حداقل مبلغ بازی ۱۰ الماس است.")
-            return
-        if amount > 10000:
-            bot.reply_to(message, "❌ حداکثر مبلغ بازی ۱۰۰۰۰ الماس است.")
-            return
-    except (IndexError, ValueError):
-        bot.reply_to(message, "❌ فرمت اشتباه است.\nمثال: `بازی 500`", parse_mode='Markdown')
-        return
-    user_id = str(message.from_user.id)
-    user = get_user(user_id)
-    if not user:
-        bot.reply_to(message, "❌ ابتدا در چت خصوصی ربات /start کنید.")
-        return
-    if user['diamonds'] < amount:
-        bot.reply_to(message, f"❌ الماس کافی ندارید! (الماس شما: {user['diamonds']})")
-        return
-    text = (
-        f"⚔️ **دوئل الماسی!**\n\n"
-        f"👤 سازنده: **{user['name']}**\n"
-        f"💎 مبلغ شرط: **{amount} الماس**\n\n"
-        f"⏳ منتظر حریف...\n"
-    )
-    markup = types.InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        types.InlineKeyboardButton(f"🤝 قبول بازی ({amount})", callback_data=f"join_game_{user_id}_{amount}"),
-        types.InlineKeyboardButton("❌ لغو بازی", callback_data=f"cancel_game_{user_id}")
-    )
-    sent_msg = bot.send_message(message.chat.id, text, reply_markup=markup, parse_mode='Markdown')
-    active_games[str(sent_msg.message_id)] = {"challenger_id": user_id, "amount": amount, "group_id": str(message.chat.id)}
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("cancel_game_"))
-def cancel_game(call):
-    user_id = str(call.from_user.id)
-    challenger_id = call.data.replace("cancel_game_", "")
-    message_id = str(call.message.message_id)
-    if user_id != challenger_id:
-        bot.answer_callback_query(call.id, "❌ فقط سازنده بازی می‌تواند آن را لغو کند!", show_alert=True)
-        return
-    if message_id in active_games:
-        del active_games[message_id]
-        bot.edit_message_text("❌ **این بازی توسط سازنده لغو شد.**", call.message.chat.id, call.message.message_id)
-    else:
-        bot.answer_callback_query(call.id, "❌ این بازی قبلاً بسته شده است.", show_alert=True)
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("join_game_"))
-def join_game(call):
-    parts = call.data.split("_")
-    challenger_id = parts[2]
-    amount = int(parts[3])
-    message_id = str(call.message.message_id)
-    if message_id not in active_games:
-        bot.answer_callback_query(call.id, "❌ این بازی بسته شده است.", show_alert=True)
-        return
-    accepter_id = str(call.from_user.id)
-    if accepter_id == challenger_id:
-        bot.answer_callback_query(call.id, "❌ شما نمی‌تونید با خودتون بازی کنید!", show_alert=True)
-        return
-    challenger = get_user(challenger_id)
-    accepter = get_user(accepter_id)
-    if not accepter:
-        bot.answer_callback_query(call.id, "❌ ابتدا در چت خصوصی /start کنید.", show_alert=True)
-        return
-    if accepter['diamonds'] < amount:
-        bot.answer_callback_query(call.id, f"❌ الماس کافی ندارید! (الماس شما: {accepter['diamonds']})", show_alert=True)
-        return
-    challenger['diamonds'] -= amount
-    accepter['diamonds'] -= amount
-    save_user(**challenger)
-    save_user(**accepter)
-    winner = random.choice([challenger, accepter])
-    loser = challenger if winner['user_id'] == accepter_id else accepter
-    winner['diamonds'] += (amount * 2)
-    save_user(**winner)
-    add_xp(winner['user_id'], 20) # XP برای برد
-    del active_games[message_id]
-    result_text = (
-        f"🏆 **نتیجه دوئل!**\n\n"
-        f"👤 بازیکن ۱: **{challenger['name']}**\n"
-        f"🤝 بازیکن ۲: **{accepter['name']}**\n"
-        f"💎 شرط: **{amount} الماس**\n\n"
-        f"🥇 **برنده: {winner['name']}** 🎉\n"
-        f"💰 جایزه: **{amount * 2} الماس**\n"
-        f"😢 بازنده: **{loser['name']}**"
-    )
-    bot.edit_message_text(result_text, call.message.chat.id, call.message.message_id, parse_mode='Markdown')
-
-# ==========================================
-# 6. هندلرهای گروه
+# 5. هندلرهای گروه
 # ==========================================
 @bot.message_handler(func=lambda message: message.chat.type in ['group', 'supergroup'] and message.text == "موجودی")
 def check_balance_group(message):
@@ -323,23 +210,23 @@ def check_balance_group(message):
     if not user:
         bot.reply_to(message, "❌ ابتدا در چت خصوصی /start کنید.")
         return
-    text = f"💎 **موجودی شما:**\n\n👤 نام: **{user['name']}**\n💰 الماس: **{user['diamonds']}**\n👑 پلن: **{user['plan']}**\n📈 سطح: **{user['level']}**"
+    text = f"💎 **موجودی شما:**\n\n👤 نام: **{user['name']}**\n💰 اعتبار: **{user['credits']}**\n👑 پلن: **{user['plan']}**"
     markup = types.InlineKeyboardMarkup(row_width=1)
     markup.add(types.InlineKeyboardButton("📋 مشاهده کامل پروفایل", url=f"https://t.me/{bot.get_me().username}"))
     bot.reply_to(message, text, reply_markup=markup, parse_mode='Markdown')
 
 @bot.message_handler(func=lambda message: message.chat.type in ['group', 'supergroup'] and message.text == "راهنما")
 def group_help(message):
-    bot.reply_to(message, "📖 **راهنما:**\n\n🔹 `بازی [مبلغ]` : ساخت بازی\n🔹 `موجودی` : نمایش الماس\n🔹 `برترین‌ها` : کاربران برتر\n🔹 `دعوت‌کنندگان` : دعوت‌کننده‌های برتر\n🔹 `راهنما` : همین پیام", parse_mode='Markdown')
+    bot.reply_to(message, "📖 **راهنما:**\n\n🔹 `موجودی` : نمایش اعتبار\n🔹 `برترین‌ها` : کاربران برتر\n🔹 `دعوت‌کنندگان` : دعوت‌کننده‌های برتر\n🔹 `راهنما` : همین پیام", parse_mode='Markdown')
 
 @bot.message_handler(func=lambda message: message.chat.type in ['group', 'supergroup'] and message.text == "برترین‌ها")
 def group_leaderboard(message):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute("SELECT name, diamonds, user_id FROM users ORDER BY diamonds DESC LIMIT 5")
+    c.execute("SELECT name, credits, user_id FROM users ORDER BY credits DESC LIMIT 5")
     rows = c.fetchall()
     conn.close()
-    text = "🏆 **۵ کاربر برتر:**\n\n" + "".join([f"{i}. **{row[0]}** ➜ {row[1]} الماس\n" for i, row in enumerate(rows, 1)])
+    text = "🏆 **۵ کاربر برتر:**\n\n" + "".join([f"{i}. **{row[0]}** ➜ {row[1]} اعتبار\n" for i, row in enumerate(rows, 1)])
     markup = types.InlineKeyboardMarkup(row_width=1)
     markup.add(types.InlineKeyboardButton("📋 مشاهده پروفایل‌ها", url=f"https://t.me/{bot.get_me().username}"))
     bot.reply_to(message, text, reply_markup=markup, parse_mode='Markdown')
@@ -357,33 +244,47 @@ def group_top_inviters(message):
     bot.reply_to(message, text, reply_markup=markup, parse_mode='Markdown')
 
 # ==========================================
-# 7. هندلرهای دکمه‌های پایین صفحه
+# 6. هندلرهای دکمه‌های پایین صفحه
 # ==========================================
 @bot.message_handler(func=lambda message: message.text == "🚀 اجرای بمبر")
 def kb_bomb(message):
     user_id = str(message.from_user.id)
     user = get_user(user_id)
-    if not user or user['diamonds'] <= 0:
-        bot.reply_to(message, "❌ الماس ندارید! ابتدا شارژ کنید.")
+    if not user or user['credits'] <= 0:
+        bot.reply_to(message, "❌ اعتبار ندارید! ابتدا شارژ کنید.")
         return
     user_states[user_id] = {"state": "waiting_for_phone"}
     bot.reply_to(message, "📞 **شماره را وارد کنید:**", parse_mode='Markdown')
 
-@bot.message_handler(func=lambda message: message.text == "💎 خرید الماس")
+@bot.message_handler(func=lambda message: message.text == "💳 خرید اعتبار")
 def kb_buy(message):
-    text = "🛒 **پلن‌های الماس:**\n\n"
+    text = "🛒 **پلن‌های اعتبار:**\n\n"
     markup = types.InlineKeyboardMarkup(row_width=1)
     for key, plan in PLANS.items():
         text += f"💎 **{plan['name']}** | {plan['price']} تومان\n"
         markup.add(types.InlineKeyboardButton(f"خرید {plan['name']}", callback_data=f"buy_{key}"))
     bot.reply_to(message, text, reply_markup=markup, parse_mode='Markdown')
 
+@bot.message_handler(func=lambda message: message.text == "🎰 گردونه شانس")
+def kb_wheel(message):
+    user_id = str(message.from_user.id)
+    user = get_user(user_id)
+    if time.time() - user['last_wheel_spin'] < WHEEL_COOLDOWN:
+        remaining = int(WHEEL_COOLDOWN - (time.time() - user['last_wheel_spin']))
+        bot.reply_to(message, f"⏳ شما امروز گردونه را چرخانده‌اید! {remaining // 3600} ساعت دیگر دوباره امتحان کنید.")
+        return
+    prize = random.choice([1, 2, 5, 10, 20, 50])
+    user['credits'] += prize
+    user['last_wheel_spin'] = time.time()
+    save_user(**user)
+    bot.reply_to(message, f"🎉 **تبریک!** شما **{prize}** اعتبار از گردونه شانس برنده شدید! 🎰")
+
 @bot.message_handler(func=lambda message: message.text == "📋 حساب کاربری")
 def kb_profile(message):
     user_id = str(message.from_user.id)
     user = get_user(user_id)
     plan_name = PLANS.get(user['plan'], {}).get('name', "بدون پلن")
-    text = f"📋 **پروفایل:**\n\n👤 نام: {user['name']}\n💎 الماس: **{user['diamonds']}**\n👑 پلن: **{plan_name}**\n👥 دعوت‌ها: **{user['invites']}**\n📈 سطح: **{user['level']}** | XP: **{user['xp']}**"
+    text = f"📋 **پروفایل:**\n\n👤 نام: {user['name']}\n💎 اعتبار: **{user['credits']}**\n👑 پلن: **{plan_name}**\n👥 دعوت‌ها: **{user['invites']}**"
     bot.reply_to(message, text, parse_mode='Markdown')
 
 @bot.message_handler(func=lambda message: message.text == "🎁 جایزه روزانه")
@@ -393,48 +294,33 @@ def kb_daily(message):
     if time.time() - user['last_daily'] < 86400:
         bot.reply_to(message, "⏳ امروز گرفته‌اید!")
     else:
-        user['diamonds'] += 2
+        user['credits'] += 2
         user['last_daily'] = time.time()
         save_user(**user)
-        add_xp(user_id, 10) # XP برای جایزه روزانه
-        bot.reply_to(message, "🎉 ۲ الماس رایگان!")
-
-@bot.message_handler(func=lambda message: message.text == "🎰 گردونه شانس")
-def kb_wheel(message):
-    user_id = str(message.from_user.id)
-    user = get_user(user_id)
-    if time.time() - user['last_wheel_spin'] < 86400:
-        bot.reply_to(message, "⏳ شما امروز گردونه را چرخانده‌اید! فردا دوباره بیایید.")
-        return
-    prize = random.choice([1, 2, 5, 10, 20, 50])
-    user['diamonds'] += prize
-    user['last_wheel_spin'] = time.time()
-    save_user(**user)
-    add_xp(user_id, 15)
-    bot.reply_to(message, f"🎉 **تبریک!** شما **{prize}** الماس از گردونه شانس برنده شدید! 🎰")
+        bot.reply_to(message, "🎉 ۲ اعتبار رایگان!")
 
 @bot.message_handler(func=lambda message: message.text == "🏆 برترین‌ها")
 def kb_leaderboard(message):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute("SELECT name, diamonds, user_id FROM users ORDER BY diamonds DESC LIMIT 5")
+    c.execute("SELECT name, credits, user_id FROM users ORDER BY credits DESC LIMIT 5")
     rows = c.fetchall()
     conn.close()
-    text = "🏆 **۵ کاربر برتر:**\n\n" + "".join([f"{i}. **{row[0]}** ➜ {row[1]} الماس\n" for i, row in enumerate(rows, 1)])
+    text = "🏆 **۵ کاربر برتر:**\n\n" + "".join([f"{i}. **{row[0]}** ➜ {row[1]} اعتبار\n" for i, row in enumerate(rows, 1)])
     bot.reply_to(message, text, parse_mode='Markdown')
 
 @bot.message_handler(func=lambda message: message.text == "👑 پنل VIP")
 def kb_vip(message):
     user_id = str(message.from_user.id)
     user = get_user(user_id)
-    if user['diamonds'] >= VIP_DIAMOND_COST:
-        user['diamonds'] -= VIP_DIAMOND_COST
+    if user['credits'] >= VIP_COST:
+        user['credits'] -= VIP_COST
         user['plan'] = "vip"
         user['sub_expiry'] = time.time() + (30 * 86400)
         save_user(**user)
         bot.reply_to(message, "🎉 تبریک! شما به باشگاه VIP پیوستید.")
     else:
-        bot.reply_to(message, f"❌ الماس کافی ندارید! نیاز: {VIP_DIAMOND_COST} الماس.")
+        bot.reply_to(message, f"❌ اعتبار کافی ندارید! نیاز: {VIP_COST} اعتبار.")
 
 @bot.message_handler(func=lambda message: message.text == "🎧 پشتیبانی")
 def kb_support(message):
@@ -462,7 +348,7 @@ def cmd_admin(message):
     kb_admin(message)
 
 # ==========================================
-# 8. هندلرهای منو (Callback Queries)
+# 7. هندلرهای منو (Callback Queries)
 # ==========================================
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callbacks(call):
@@ -478,7 +364,7 @@ def handle_callbacks(call):
 
     elif call.data == "menu_profile":
         plan_name = PLANS.get(user['plan'], {}).get('name', "بدون پلن")
-        text = f"📋 **پروفایل:**\n\n👤 نام: {user['name']}\n💎 الماس: **{user['diamonds']}**\n👑 پلن: **{plan_name}**\n👥 تعداد دعوت: **{user['invites']}**\n📈 سطح: **{user['level']}** | XP: **{user['xp']}**"
+        text = f"📋 **پروفایل:**\n\n👤 نام: {user['name']}\n💎 اعتبار: **{user['credits']}**\n👑 پلن: **{plan_name}**\n👥 تعداد دعوت: **{user['invites']}**"
         markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="menu_back"))
         bot.edit_message_caption(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
 
@@ -496,22 +382,20 @@ def handle_callbacks(call):
         if time.time() - user['last_daily'] < 86400:
             bot.answer_callback_query(call.id, "⏳ امروز گرفته‌اید!", show_alert=True)
         else:
-            user['diamonds'] += 2
+            user['credits'] += 2
             user['last_daily'] = time.time()
             save_user(**user)
-            add_xp(user_id, 10)
-            bot.answer_callback_query(call.id, "🎉 ۲ الماس رایگان!", show_alert=True)
+            bot.answer_callback_query(call.id, "🎉 ۲ اعتبار رایگان!", show_alert=True)
 
     elif call.data == "menu_wheel":
-        if time.time() - user['last_wheel_spin'] < 86400:
+        if time.time() - user['last_wheel_spin'] < WHEEL_COOLDOWN:
             bot.answer_callback_query(call.id, "⏳ امروز چرخانده‌اید!", show_alert=True)
         else:
             prize = random.choice([1, 2, 5, 10, 20, 50])
-            user['diamonds'] += prize
+            user['credits'] += prize
             user['last_wheel_spin'] = time.time()
             save_user(**user)
-            add_xp(user_id, 15)
-            bot.answer_callback_query(call.id, f"🎉 {prize} الماس برنده شدید!", show_alert=True)
+            bot.answer_callback_query(call.id, f"🎉 {prize} اعتبار برنده شدید!", show_alert=True)
 
     elif call.data == "menu_gift":
         user_states[user_id] = {"state": "waiting_for_gift"}
@@ -519,7 +403,7 @@ def handle_callbacks(call):
         bot.edit_message_caption("🔑 کد هدیه:", call.message.chat.id, call.message.message_id, reply_markup=markup)
 
     elif call.data == "menu_buy":
-        text = "🛒 **پلن‌های الماس:**\n\n"
+        text = "🛒 **پلن‌های اعتبار:**\n\n"
         markup = types.InlineKeyboardMarkup(row_width=1)
         for key, plan in PLANS.items():
             text += f"💎 **{plan['name']}** | {plan['price']} تومان\n"
@@ -544,23 +428,23 @@ def handle_callbacks(call):
             bot.answer_callback_query(call.id, "⚠️ سهمیه امروز پر شده!", show_alert=True)
             return
         if user['plan'] == "vip" and user['sub_expiry'] > time.time(): pass
-        elif user['diamonds'] <= 0:
-            bot.answer_callback_query(call.id, "❌ الماس ندارید!", show_alert=True)
+        elif user['credits'] <= 0:
+            bot.answer_callback_query(call.id, "❌ اعتبار ندارید!", show_alert=True)
             return
         user_states[user_id] = {"state": "waiting_for_phone"}
         markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 انصراف", callback_data="menu_back"))
         bot.edit_message_caption("📞 **شماره را وارد کنید:**", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
 
     elif call.data == "menu_vip_club":
-        if user['diamonds'] >= VIP_DIAMOND_COST:
-            user['diamonds'] -= VIP_DIAMOND_COST
+        if user['credits'] >= VIP_COST:
+            user['credits'] -= VIP_COST
             user['plan'] = "vip"
             user['sub_expiry'] = time.time() + (30 * 86400)
             save_user(**user)
             bot.answer_callback_query(call.id, f"🎉 تبریک! شما به باشگاه VIP پیوستید.", show_alert=True)
             caption = "👑 **به باشگاه VIP خوش آمدید!**"
         else:
-            caption = f"❌ الماس کافی ندارید! نیاز: {VIP_DIAMOND_COST} الماس."
+            caption = f"❌ اعتبار کافی ندارید! نیاز: {VIP_COST} اعتبار."
         markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="menu_back"))
         bot.edit_message_caption(caption, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
 
@@ -570,11 +454,11 @@ def handle_callbacks(call):
         c = conn.cursor()
         c.execute("SELECT COUNT(*) FROM users")
         total_users = c.fetchone()[0]
-        c.execute("SELECT SUM(diamonds) FROM users")
-        total_diamonds = c.fetchone()[0] or 0
+        c.execute("SELECT SUM(credits) FROM users")
+        total_credits = c.fetchone()[0] or 0
         conn.close()
         bot.answer_callback_query(call.id)
-        bot.send_message(call.message.chat.id, f"📊 **آمار:**\n👥 کاربران: {total_users}\n💎 کل الماس‌ها: {total_diamonds}", parse_mode='Markdown')
+        bot.send_message(call.message.chat.id, f"📊 **آمار:**\n👥 کاربران: {total_users}\n💎 کل اعتبارها: {total_credits}", parse_mode='Markdown')
 
     elif call.data == "admin_broadcast" and call.from_user.id == ADMIN_ID:
         bot.answer_callback_query(call.id)
@@ -583,17 +467,17 @@ def handle_callbacks(call):
 
     elif call.data == "admin_bulk_charge" and call.from_user.id == ADMIN_ID:
         bot.answer_callback_query(call.id)
-        msg = bot.send_message(call.message.chat.id, "🎁 چند الماس به همه کاربران اضافه کنم؟ (فقط عدد):")
+        msg = bot.send_message(call.message.chat.id, "🎁 چند اعتبار به همه کاربران اضافه کنم؟ (فقط عدد):")
         bot.register_next_step_handler(msg, process_bulk_charge)
 
     elif call.data == "admin_bulk_deduct" and call.from_user.id == ADMIN_ID:
         bot.answer_callback_query(call.id)
-        msg = bot.send_message(call.message.chat.id, "📉 چند الماس از همه کاربران کم کنم؟ (فقط عدد):")
+        msg = bot.send_message(call.message.chat.id, "📉 چند اعتبار از همه کاربران کم کنم؟ (فقط عدد):")
         bot.register_next_step_handler(msg, process_bulk_deduct)
 
     elif call.data == "admin_gifts" and call.from_user.id == ADMIN_ID:
         bot.answer_callback_query(call.id)
-        msg = bot.send_message(call.message.chat.id, "🔑 فرمت: `CODE DIAMONDS` (مثال: `WELCOME 10`):")
+        msg = bot.send_message(call.message.chat.id, "🔑 فرمت: `CODE CREDITS` (مثال: `WELCOME 10`):")
         bot.register_next_step_handler(msg, process_make_gift)
 
     elif call.data == "admin_view_user" and call.from_user.id == ADMIN_ID:
@@ -620,10 +504,10 @@ def handle_callbacks(call):
             plan = PLANS[plan_key]
             user_data = get_user(uid)
             if user_data:
-                user_data["diamonds"] += plan["diamonds"]
+                user_data["credits"] += plan["credits"]
                 user_data["total_purchases"] += 1
                 save_user(**user_data)
-                bot.send_message(uid, f"💎 **پرداخت تایید شد!**\n**{plan['diamonds']}** الماس به حساب شما اضافه شد.", parse_mode='Markdown')
+                bot.send_message(uid, f"💎 **پرداخت تایید شد!**\n**{plan['credits']}** اعتبار به حساب شما اضافه شد.", parse_mode='Markdown')
             bot.edit_message_text(f"✅ تایید شد.", call.message.chat.id, call.message.message_id)
             del pending_approvals[req_id]
 
@@ -636,7 +520,7 @@ def handle_callbacks(call):
             del pending_approvals[req_id]
 
 # ==========================================
-# 9. توابع کمکی و دریافت ورودی‌ها
+# 8. توابع کمکی و دریافت ورودی‌ها
 # ==========================================
 def send_broadcast(message):
     conn = sqlite3.connect(DB_FILE)
@@ -657,13 +541,13 @@ def process_bulk_charge(message):
         if amount <= 0: return
         conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
-        c.execute("UPDATE users SET diamonds = diamonds + ?", (amount,))
+        c.execute("UPDATE users SET credits = credits + ?", (amount,))
         conn.commit()
         c.execute("SELECT user_id FROM users")
         users = c.fetchall()
         conn.close()
         for u in users:
-            try: bot.send_message(u[0], f"💎 **هدیه!**\n{amount} الماس اضافه شد.", parse_mode='Markdown'); time.sleep(0.05)
+            try: bot.send_message(u[0], f"💎 **هدیه!**\n{amount} اعتبار اضافه شد.", parse_mode='Markdown'); time.sleep(0.05)
             except: pass
         bot.send_message(ADMIN_ID, f"✅ شارژ انجام شد.")
     except: pass
@@ -675,16 +559,16 @@ def process_bulk_deduct(message):
         if amount <= 0: return
         conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
-        c.execute("UPDATE users SET diamonds = MAX(0, diamonds - ?)", (amount,))
+        c.execute("UPDATE users SET credits = MAX(0, credits - ?)", (amount,))
         conn.commit()
         conn.close()
-        bot.send_message(ADMIN_ID, f"✅ کسر همگانی انجام شد.\n{amount} الماس کم شد.")
+        bot.send_message(ADMIN_ID, f"✅ کسر همگانی انجام شد.\n{amount} اعتبار کم شد.")
     except: pass
 
 def process_make_gift(message):
     try:
         parts = message.text.split()
-        active_gift_codes[parts[0].upper()] = {"uses": int(parts[1]), "diamonds": 5}
+        active_gift_codes[parts[0].upper()] = {"uses": int(parts[1]), "credits": 5}
         bot.reply_to(message, f"✅ کد ساخته شد.")
     except: bot.reply_to(message, "❌ فرمت اشتباه.")
 
@@ -692,7 +576,7 @@ def view_user_admin(message):
     uid = message.text.strip()
     user = get_user(uid)
     if user:
-        bot.reply_to(message, f"👤 {user['name']}\n💎 {user['plan']}\n💎 {user['diamonds']} الماس\n📈 لول: {user['level']} (XP: {user['xp']})")
+        bot.reply_to(message, f"👤 {user['name']}\n💎 {user['plan']}\n💎 {user['credits']} اعتبار")
     else: bot.reply_to(message, "❌ کاربر یافت نشد.")
 
 def send_reply_to_user(message, target_user):
@@ -758,11 +642,11 @@ def process_text_inputs(message):
             del user_states[user_id]
             return
         if user['plan'] == "vip" and user['sub_expiry'] > time.time(): pass
-        elif user['diamonds'] < len(phones):
-            bot.reply_to(message, f"❌ الماس کافی ندارید! (نیاز: {len(phones)} الماس)")
+        elif user['credits'] < len(phones):
+            bot.reply_to(message, f"❌ اعتبار کافی ندارید! (نیاز: {len(phones)} اعتبار)")
             del user_states[user_id]
             return
-        else: user['diamonds'] -= len(phones)
+        else: user['credits'] -= len(phones)
         user['daily_bomb_count'] += len(phones)
         save_user(**user)
         del user_states[user_id]
@@ -775,11 +659,11 @@ def process_text_inputs(message):
         code = message.text.strip().upper()
         del user_states[user_id]
         if code in active_gift_codes and active_gift_codes[code]["uses"] > 0:
-            amount = active_gift_codes[code]["diamonds"]
+            amount = active_gift_codes[code]["credits"]
             active_gift_codes[code]["uses"] -= 1
-            user['diamonds'] += amount
+            user['credits'] += amount
             save_user(**user)
-            bot.reply_to(message, f"💎 {amount} الماس اضافه شد.")
+            bot.reply_to(message, f"💎 {amount} اعتبار اضافه شد.")
         else:
             bot.reply_to(message, "❌ کد نامعتبر.")
 
