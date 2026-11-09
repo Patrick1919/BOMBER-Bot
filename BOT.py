@@ -38,18 +38,18 @@ PANEL_IMAGE_URL = "https://i.imgur.com/Z7lvgzO.jpeg"
 VIP_COST = 1000
 WHEEL_COOLDOWN = 86400
 
-# ⚠️ جوین اجباری
-CHANNEL_1 = "@Black0169" # نام کانال اول رو بذار (با @)
-CHANNEL_2 = "@YourChannel2" # نام کانال دوم (اختیاری)
+# ⚠️ جوین اجباری (نام کانال‌های خود را وارد کنید)
+CHANNEL_1 = "@BloodBomber_Chanel"
+CHANNEL_2 = "@YourChannel2"
 
 # ==========================================
-# تنظیمات سرعت و تعداد بر اساس پلن
+# تنظیمات سرویس‌ها (رایگان و اشتراکی)
 # ==========================================
-PLAN_SPEED = {
-    "free":  {"max_phones": 2,  "delay": 1.0},
-    "basic": {"max_phones": 3,  "delay": 0.5},
-    "pro":   {"max_phones": 5,  "delay": 0.3},
-    "vip":   {"max_phones": 10, "delay": 0.1}
+SERVICE_CONFIG = {
+    "free":  {"name": "رایگان", "max_phones": 2,  "delay": 1.0, "max_daily": 3},
+    "basic": {"name": "پایه",   "max_phones": 3,  "delay": 0.5, "max_daily": 999},
+    "pro":   {"name": "حرفه‌ای","max_phones": 5,  "delay": 0.3, "max_daily": 999},
+    "vip":   {"name": "ویژه (VIP)", "max_phones": 10, "delay": 0.1, "max_daily": 999}
 }
 
 def init_db():
@@ -90,7 +90,7 @@ PLANS = {
 }
 
 # ==========================================
-# 3. هسته بمبر (با تفاوت سرعت)
+# 3. هسته بمبر
 # ==========================================
 class Bomber:
     def __init__(self, phone_numbers, user_id, plan):
@@ -119,8 +119,7 @@ class Bomber:
             method = service['method'].upper()
             use_json = service.get('json', False)
             
-            # اعمال تاخیر بر اساس پلن
-            delay = PLAN_SPEED.get(self.plan, PLAN_SPEED["free"])["delay"]
+            delay = SERVICE_CONFIG.get(self.plan, SERVICE_CONFIG["free"])["delay"]
             
             if method == 'POST':
                 if use_json: resp = self.session.post(service['url'], json=data, headers=headers, timeout=5)
@@ -135,7 +134,7 @@ class Bomber:
         for service in subset:
             if self.stop_event.is_set(): break
             self.send_request(service, phone)
-            time.sleep(PLAN_SPEED.get(self.plan, PLAN_SPEED["free"])["delay"])
+            time.sleep(SERVICE_CONFIG.get(self.plan, SERVICE_CONFIG["free"])["delay"])
 
     def start(self):
         if not self.services:
@@ -158,24 +157,26 @@ class Bomber:
         if self.user_id in active_bombers: del active_bombers[self.user_id]
 
 # ==========================================
-# 4. کیبوردها
+# 4. کیبوردها (اصلاح‌شده)
 # ==========================================
 def get_reply_keyboard(is_admin=False):
     markup = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
+    # دو بخش اصلی بمبر
     markup.add(
-        types.KeyboardButton("🚀 اجرای بمبر"),
-        types.KeyboardButton("💳 خرید اعتبار")
+        types.KeyboardButton("🆓 اجرای رایگان"),
+        types.KeyboardButton("💎 اجرای اشتراکی")
     )
+    # بخش خرید و پروفایل
     markup.add(
-        types.KeyboardButton("🎰 گردونه شانس"),
+        types.KeyboardButton("💳 خرید اعتبار"),
         types.KeyboardButton("📋 حساب کاربری")
     )
+    # بخش‌های جانبی
     markup.add(
-        types.KeyboardButton("🎁 جایزه روزانه"),
-        types.KeyboardButton("🏆 برترین‌ها")
+        types.KeyboardButton("🎰 گردونه شانس"),
+        types.KeyboardButton("🎁 جایزه روزانه")
     )
-    markup.add(types.KeyboardButton("👑 پنل VIP"))
-    markup.add(types.KeyboardButton("🎧 پشتیبانی"))
+    markup.add(types.KeyboardButton("🏆 برترین‌ها"))
     if is_admin:
         markup.add(types.KeyboardButton("⚙️ پنل مدیریت"))
     return markup
@@ -183,19 +184,18 @@ def get_reply_keyboard(is_admin=False):
 def get_main_menu():
     markup = types.InlineKeyboardMarkup(row_width=2)
     markup.add(
-        types.InlineKeyboardButton("🚀 اجرای بمبر", callback_data="menu_bomb"),
-        types.InlineKeyboardButton("💳 خرید اعتبار", callback_data="menu_buy")
+        types.InlineKeyboardButton("🆓 اجرای رایگان", callback_data="menu_bomb_free"),
+        types.InlineKeyboardButton("💎 اجرای اشتراکی", callback_data="menu_bomb_sub")
+    )
+    markup.add(
+        types.InlineKeyboardButton("💳 خرید اعتبار", callback_data="menu_buy"),
+        types.InlineKeyboardButton("📋 حساب کاربری", callback_data="menu_profile")
     )
     markup.add(
         types.InlineKeyboardButton("🎰 گردونه شانس", callback_data="menu_wheel"),
         types.InlineKeyboardButton("🎁 جایزه روزانه", callback_data="menu_daily")
     )
-    markup.add(
-        types.InlineKeyboardButton("📋 حساب کاربری", callback_data="menu_profile"),
-        types.InlineKeyboardButton("🏆 برترین‌ها", callback_data="menu_leaderboard")
-    )
-    markup.add(types.InlineKeyboardButton("👥 برترین دعوت‌کنندگان", callback_data="menu_top_inviters"))
-    markup.add(types.InlineKeyboardButton("👑 پنل VIP", callback_data="menu_vip_club"))
+    markup.add(types.InlineKeyboardButton("🏆 برترین‌ها", callback_data="menu_leaderboard"))
     markup.add(types.InlineKeyboardButton("🎧 پشتیبانی", callback_data="menu_support"))
     markup.add(types.InlineKeyboardButton("🔑 کد هدیه", callback_data="menu_gift"))
     return markup
@@ -205,24 +205,29 @@ def get_main_menu():
 # ==========================================
 def is_user_joined(user_id):
     try:
-        chat_member = bot.get_chat_member(CHANNEL_1, user_id)
-        if chat_member.status in ['member', 'administrator', 'creator']:
-            return True
-        return False
-    except:
-        # اگر خطا داد (مثلاً ربات ادمین کانال نیست)، اجازه عبور بده
+        member_1 = bot.get_chat_member(CHANNEL_1, user_id)
+        if member_1.status not in ['member', 'administrator', 'creator']:
+            return False
+        if CHANNEL_2 and CHANNEL_2 != "@YourChannel2":
+            member_2 = bot.get_chat_member(CHANNEL_2, user_id)
+            if member_2.status not in ['member', 'administrator', 'creator']:
+                return False
+        return True
+    except Exception as e:
+        print(f"Join Check Error: {e}")
         return True
 
 @bot.message_handler(commands=['start'])
 def cmd_start(message):
     user_id = str(message.from_user.id)
     
-    # بررسی جوین اجباری
     if not is_user_joined(user_id):
         markup = types.InlineKeyboardMarkup(row_width=1)
-        markup.add(types.InlineKeyboardButton("📢 عضویت در کانال", url=f"https://t.me/{CHANNEL_1.replace('@', '')}"))
+        markup.add(types.InlineKeyboardButton("📢 عضویت در کانال ۱", url=f"https://t.me/{CHANNEL_1.replace('@', '')}"))
+        if CHANNEL_2 and CHANNEL_2 != "@YourChannel2":
+            markup.add(types.InlineKeyboardButton("📢 عضویت در کانال ۲", url=f"https://t.me/{CHANNEL_2.replace('@', '')}"))
         markup.add(types.InlineKeyboardButton("✅ عضو شدم", callback_data="check_join"))
-        bot.send_message(message.chat.id, "⚠️ **برای استفاده از ربات، ابتدا باید در کانال ما عضو شوید!**\n\nپس از عضویت، روی دکمه «عضو شدم» کلیک کنید.", reply_markup=markup, parse_mode='Markdown')
+        bot.send_message(message.chat.id, "⚠️ **برای استفاده از ربات، ابتدا باید در کانال‌های ما عضو شوید!**", reply_markup=markup, parse_mode='Markdown')
         return
         
     user = get_user(user_id)
@@ -245,7 +250,6 @@ def cmd_start(message):
     is_admin = (message.from_user.id == ADMIN_ID)
     bot_info = bot.get_me()
     bot_id = bot_info.id
-    
     user_mention = f"[{message.from_user.first_name}](tg://user?id={user_id})"
     bot_mention = f"[Blood-Bomber](tg://user?id={bot_id})"
     
@@ -270,7 +274,7 @@ def check_join_callback(call):
         bot.answer_callback_query(call.id, "❌ شما هنوز عضو نشده‌اید!", show_alert=True)
 
 # ==========================================
-# 6. پروفایل کامل (با تاریخ و آیدی)
+# 6. پروفایل کامل
 # ==========================================
 @bot.message_handler(func=lambda message: message.text == "📋 حساب کاربری")
 def kb_profile(message):
@@ -281,12 +285,9 @@ def kb_profile(message):
         return
         
     plan_name = PLANS.get(user['plan'], {}).get('name', "رایگان")
-    if user['plan'] == "free":
-        plan_name = "🆓 رایگان"
-    elif user['plan'] == "vip" and user['sub_expiry'] > time.time():
-        plan_name = "👑 ویژه (VIP)"
-    else:
-        plan_name = PLANS.get(user['plan'], {}).get('name', "بدون پلن")
+    if user['plan'] == "free": plan_name = "🆓 رایگان"
+    elif user['plan'] == "vip" and user['sub_expiry'] > time.time(): plan_name = "👑 ویژه (VIP)"
+    else: plan_name = PLANS.get(user['plan'], {}).get('name', "بدون پلن")
         
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
@@ -297,39 +298,48 @@ def kb_profile(message):
         f"👑 **نوع حساب:** **{plan_name}**\n"
         f"💰 **اعتبار:** **{user['credits']}**\n"
         f"👥 **دعوت‌ها:** **{user['invites']}**\n"
-        f"📞 **شماره‌های مجاز هر بار:** **{PLAN_SPEED.get(user['plan'], PLAN_SPEED['free'])['max_phones']}**\n"
+        f"📞 **شماره‌های مجاز هر بار:** **{SERVICE_CONFIG.get(user['plan'], SERVICE_CONFIG['free'])['max_phones']}**\n"
     )
     bot.reply_to(message, text, parse_mode='Markdown')
 
 # ==========================================
-# 7. هندلر بمبر (با محدودیت پلن)
+# 7. هندلرهای اجرای سرویس‌ها (اصلاح‌شده)
 # ==========================================
-@bot.message_handler(func=lambda message: message.text == "🚀 اجرای بمبر")
-def kb_bomb(message):
+@bot.message_handler(func=lambda message: message.text == "🆓 اجرای رایگان")
+def kb_service_free(message):
     user_id = str(message.from_user.id)
     user = get_user(user_id)
     if not user:
         bot.reply_to(message, "ابتدا /start کنید.")
         return
         
-    # کاربر رایگان اعتبار نداره ولی می‌تونه ۳ بار در روز استفاده کنه
-    if user['plan'] == "free":
-        today = datetime.now().strftime("%Y-%m-%d")
-        if user['last_bomb_date'] != today:
-            user['last_bomb_date'] = today
-            user['daily_bomb_count'] = 0
-        if user['daily_bomb_count'] >= 3:
-            bot.reply_to(message, "❌ شما به محدودیت روزانه سرویس رایگان رسیده‌اید! برای استفاده بیشتر، پلن بخرید.")
-            return
-    elif user['plan'] == "vip" and user['sub_expiry'] > time.time():
-        pass
-    elif user['credits'] <= 0:
-        bot.reply_to(message, "❌ اعتبار ندارید! ابتدا شارژ کنید.")
+    today = datetime.now().strftime("%Y-%m-%d")
+    if user['last_bomb_date'] != today:
+        user['last_bomb_date'] = today
+        user['daily_bomb_count'] = 0
+    if user['daily_bomb_count'] >= SERVICE_CONFIG["free"]["max_daily"]:
+        bot.reply_to(message, f"❌ سهمیه رایگان امروز شما پر شده! حداکثر {SERVICE_CONFIG['free']['max_daily']} بار در روز.")
         return
         
-    user_states[user_id] = {"state": "waiting_for_phone"}
-    max_phones = PLAN_SPEED.get(user['plan'], PLAN_SPEED['free'])['max_phones']
-    bot.reply_to(message, f"📞 **شماره را وارد کنید:**\n(حداکثر {max_phones} شماره با کاما جدا کنید)", parse_mode='Markdown')
+    user_states[user_id] = {"state": "waiting_for_phone", "service": "free"}
+    bot.reply_to(message, f"📞 **سرویس رایگان** (حداکثر {SERVICE_CONFIG['free']['max_phones']} شماره):\nشماره را وارد کنید:", parse_mode='Markdown')
+
+@bot.message_handler(func=lambda message: message.text == "💎 اجرای اشتراکی")
+def kb_service_sub(message):
+    user_id = str(message.from_user.id)
+    user = get_user(user_id)
+    if not user:
+        bot.reply_to(message, "ابتدا /start کنید.")
+        return
+    
+    # نمایش کیبورد شیشه‌ای برای انتخاب نوع اشتراک
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        types.InlineKeyboardButton("💎 پایه (۳ شماره)", callback_data="sub_basic"),
+        types.InlineKeyboardButton("🔥 حرفه‌ای (۵ شماره)", callback_data="sub_pro"),
+        types.InlineKeyboardButton("👑 VIP (۱۰ شماره)", callback_data="sub_vip")
+    )
+    bot.reply_to(message, "**نوع اشتراک خود را انتخاب کنید:**", reply_markup=markup, parse_mode='Markdown')
 
 # ==========================================
 # 8. خرید و سایر دکمه‌ها
@@ -416,7 +426,7 @@ def kb_admin(message):
     bot.reply_to(message, "**پنل مدیریت**", reply_markup=markup, parse_mode='Markdown')
 
 # ==========================================
-# 9. هندلرهای منو
+# 9. هندلرهای منو (با اصلاح دکمه‌های اشتراکی)
 # ==========================================
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callbacks(call):
@@ -462,12 +472,28 @@ def handle_callbacks(call):
         markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="menu_buy"))
         bot.edit_message_caption(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
 
-    elif call.data == "menu_bomb":
-        user_states[user_id] = {"state": "waiting_for_phone"}
-        max_phones = PLAN_SPEED.get(user['plan'], PLAN_SPEED['free'])['max_phones']
+    elif call.data == "menu_bomb_free":
+        user_states[user_id] = {"state": "waiting_for_phone", "service": "free"}
         markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 انصراف", callback_data="menu_back"))
-        bot.edit_message_caption(f"📞 **شماره را وارد کنید:**\n(حداکثر {max_phones} شماره)", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
+        bot.edit_message_caption(f"📞 **سرویس رایگان**:\nشماره را وارد کنید:", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
 
+    elif call.data == "menu_bomb_sub":
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        markup.add(
+            types.InlineKeyboardButton("💎 پایه (۳ شماره)", callback_data="sub_basic"),
+            types.InlineKeyboardButton("🔥 حرفه‌ای (۵ شماره)", callback_data="sub_pro"),
+            types.InlineKeyboardButton("👑 VIP (۱۰ شماره)", callback_data="sub_vip")
+        )
+        bot.edit_message_caption("**نوع اشتراک خود را انتخاب کنید:**", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
+
+    elif call.data.startswith("sub_"):
+        sub_type = call.data.replace("sub_", "")
+        user_states[user_id] = {"state": "waiting_for_phone", "service": sub_type}
+        max_phones = SERVICE_CONFIG[sub_type]["max_phones"]
+        markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 انصراف", callback_data="menu_back"))
+        bot.edit_message_caption(f"📞 **سرویس {SERVICE_CONFIG[sub_type]['name']}** (حداکثر {max_phones} شماره):\nشماره را وارد کنید:", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
+
+    # ادمین
     elif call.data == "admin_stats" and call.from_user.id == ADMIN_ID:
         conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
@@ -514,6 +540,7 @@ def handle_callbacks(call):
             user_data = get_user(uid)
             if user_data:
                 user_data["credits"] += plan["credits"]
+                user_data["plan"] = plan_key # اعمال پلن خریداری شده
                 user_data["total_purchases"] += 1
                 save_user(**user_data)
                 bot.send_message(uid, f"**پرداخت تایید شد!**\n**{plan['credits']}** اعتبار اضافه شد.", parse_mode='Markdown')
@@ -555,6 +582,7 @@ def handle_photo(message):
 def process_text_inputs(message):
     user_id = str(message.from_user.id)
     state = user_states[user_id].get("state")
+    service_type = user_states[user_id].get("service", "free")
     user = get_user(user_id)
     
     if message.text == "لغو":
@@ -569,21 +597,21 @@ def process_text_inputs(message):
 
     elif state == "waiting_for_phone":
         phones = message.text.strip().replace(" ", "").split(",")
-        max_phones = PLAN_SPEED.get(user['plan'], PLAN_SPEED['free'])['max_phones']
+        max_phones = SERVICE_CONFIG.get(service_type, SERVICE_CONFIG["free"])["max_phones"]
         if len(phones) > max_phones:
-            bot.reply_to(message, f"❌ حداکثر تعداد شماره برای پلن شما {max_phones} است.")
+            bot.reply_to(message, f"❌ حداکثر تعداد شماره برای این سرویس {max_phones} است.")
             return
         if any(len(p) < 10 or not p.isdigit() for p in phones):
             bot.reply_to(message, "❌ فرمت نامعتبر.")
             return
         
-        # مدیریت محدودیت رایگان
-        if user['plan'] == "free":
+        # بررسی اعتبار و محدودیت
+        if service_type == "free":
             today = datetime.now().strftime("%Y-%m-%d")
             if user['last_bomb_date'] != today:
                 user['last_bomb_date'] = today
                 user['daily_bomb_count'] = 0
-            if user['daily_bomb_count'] + len(phones) > 3:
+            if user['daily_bomb_count'] + len(phones) > SERVICE_CONFIG["free"]["max_daily"]:
                 bot.reply_to(message, "❌ سهمیه رایگان شما پر شده!")
                 del user_states[user_id]
                 return
@@ -598,7 +626,7 @@ def process_text_inputs(message):
         save_user(**user)
         del user_states[user_id]
         bot.reply_to(message, f"🚀 **شروع شد!** هدف: `{len(phones)}` شماره", parse_mode='Markdown')
-        bomber = Bomber(",".join(phones), user_id, user['plan'])
+        bomber = Bomber(",".join(phones), user_id, service_type)
         active_bombers[user_id] = bomber
         threading.Thread(target=bomber.start).start()
 
