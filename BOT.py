@@ -10,8 +10,17 @@ from flask import Flask
 from datetime import datetime
 import traceback
 
+# ==========================================
+# ⚠️ تعریف متغیر phone قبل از ایمپورت لیست سرویس‌ها
+# این کار باعث میشه خطای NameError رخ نده
+# ==========================================
+phone = "+989120000000" 
+
 from services import SERVICES_LIST
 
+# ==========================================
+# 1. وب‌سرور برای سلامت پورت (Render)
+# ==========================================
 app = Flask(__name__)
 @app.route('/')
 def health(): return "Bot is running!", 200
@@ -20,6 +29,9 @@ def run_web():
     app.run(host='0.0.0.0', port=port, use_reloader=False)
 threading.Thread(target=run_web, daemon=True).start()
 
+# ==========================================
+# 2. تنظیمات و دیتابیس
+# ==========================================
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 ADMIN_ID = 6914309071
 CARD_NUMBER = "[شماره_کارت_اینجا]" 
@@ -84,6 +96,9 @@ def send_join_message(chat_id):
     markup.add(types.InlineKeyboardButton("✅ عضو شدم", callback_data="check_join"))
     bot.send_message(chat_id, "⚠️ **برای استفاده از ربات، ابتدا باید در کانال ما عضو شوید!**", reply_markup=markup, parse_mode='Markdown')
 
+# ==========================================
+# 3. هسته بمبر (با نوار وضعیت)
+# ==========================================
 class Bomber:
     def __init__(self, phone_number, user_id):
         self.phone_number = phone_number
@@ -132,7 +147,6 @@ class Bomber:
         if not self.phone_number.startswith("+"): 
             self.phone_number = "+98" + self.phone_number.lstrip("0")
 
-        # ارسال پیام اولیه نوار وضعیت
         status_msg = bot.send_message(self.user_id, f"⏳ **در حال ارسال...**\nمیزان پیشرفت: 0/{self.total_services}", parse_mode='Markdown')
         
         chunks = [self.services[i:i + chunk_size] for i in range(0, self.total_services, chunk_size)]
@@ -141,11 +155,10 @@ class Bomber:
             t.start()
             threads.append(t)
                 
-        # آپدیت زنده نوار وضعیت
         def update_status():
             last_update = time.time()
             while any(t.is_alive() for t in threads):
-                if time.time() - last_update > 2: # هر ۲ ثانیه
+                if time.time() - last_update > 2:
                     done = self.success + self.fail
                     percent = int((done / self.total_services) * 100) if self.total_services > 0 else 0
                     bar = "█" * (percent // 10) + "░" * (10 - (percent // 10))
@@ -176,7 +189,7 @@ class Bomber:
         if self.user_id in active_bombers: del active_bombers[self.user_id]
 
 # ==========================================
-# منوها
+# 4. منوها
 # ==========================================
 def get_main_menu():
     markup = types.InlineKeyboardMarkup(row_width=2)
