@@ -79,8 +79,8 @@ def save_user(user_id, name, plan, credits, last_daily, sub_expiry, daily_bomb_c
 user_states, pending_approvals, active_bombers, active_gift_codes = {}, {}, {}, {}
 
 PLANS = {
-    "basic": {"name": "پایه (150 اعتبار)", "price": 150, "credits": 100},
-    "pro": {"name": "حرفه‌ای (600 اعتبار)", "price": 450, "credits": 500},
+    "basic": {"name": "پایه (۱۰۰ اعتبار)", "price": 150, "credits": 100},
+    "pro": {"name": "حرفه‌ای (۵۰۰ اعتبار)", "price": 450, "credits": 500},
     "vip": {"name": "ویژه (۱۲۰۰ اعتبار)", "price": 600, "credits": 1200}
 }
 
@@ -101,7 +101,7 @@ class Bomber:
         self.total_services = len(self.services) * len(self.phone_numbers)
 
     def load_services(self):
-        
+        # ⚠️⚠️⚠️ لیست سرویس‌های خودت رو دقیقاً اینجا کپی کن ⚠️⚠️⚠️
         self.services = [
             {'name': 'Digikala Jet', 'url': 'https://api.digikalajet.ir/user/login-register/', 'method': 'POST', 'data': lambda: {"phone": self.phone_number}, 'json': True},
     {'name': 'Limoome', 'url': 'https://my.limoome.com/api/auth/login/otp', 'method': 'POST', 'data': lambda: {"mobileNumber": self.phone_number.split("+98")[1], "country": "1"}, 'json': False},
@@ -440,7 +440,7 @@ def kb_profile(message):
 # ==========================================
 # 7. هندلرهای اجرای سرویس‌ها
 # ==========================================
-@bot.message_handler(func=lambda message: message.text == "🆓  رایگان")
+@bot.message_handler(func=lambda message: message.text == "🆓 اجرای رایگان")
 def kb_service_free(message):
     user_id = str(message.from_user.id)
     user = get_user(user_id)
@@ -459,7 +459,7 @@ def kb_service_free(message):
     user_states[user_id] = {"state": "waiting_for_phone", "service": "free"}
     bot.reply_to(message, f"📞 **سرویس رایگان** (حداکثر {SERVICE_CONFIG['free']['max_phones']} شماره):\nشماره را وارد کنید:", parse_mode='Markdown')
 
-@bot.message_handler(func=lambda message: message.text == "💎  اشتراکی")
+@bot.message_handler(func=lambda message: message.text == "💎 اجرای اشتراکی")
 def kb_service_sub(message):
     user_id = str(message.from_user.id)
     user = get_user(user_id)
@@ -508,10 +508,10 @@ def kb_daily(message):
     if time.time() - user['last_daily'] < 86400:
         bot.reply_to(message, "⏳ امروز گرفته‌اید!")
     else:
-        user['credits'] += 1
+        user['credits'] += 2
         user['last_daily'] = time.time()
         save_user(**user)
-        bot.reply_to(message, "🎉 1 اعتبار رایگان!")
+        bot.reply_to(message, "🎉 ۲ اعتبار رایگان!")
 
 @bot.message_handler(func=lambda message: message.text == "🏆 برترین‌ها")
 def kb_leaderboard(message):
