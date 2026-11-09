@@ -22,7 +22,7 @@ def health(): return "Bot is running!", 200
 # ==========================================
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 ADMIN_ID = 6914309071
-CARD_NUMBER = "[شماره_کارت_اینجا]" 
+CARD_NUMBER = "[شماره_کارت_اینجا]" # ⚠️ شماره کارت خودت رو اینجا بذار
 DB_FILE = "bot_database.db"
 bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
 
@@ -57,7 +57,7 @@ def save_user(user_id, name, plan, diamonds, last_daily, sub_expiry, daily_bomb_
     conn.commit()
     conn.close()
 
-user_states, pending_approvals, active_bombers, active_gift_codes, admin_states = {}, {}, {}, {}, {}
+user_states, pending_approvals, active_bombers, active_gift_codes = {}, {}, {}, {}
 
 PLANS = {
     "basic": {"name": "الماس ۱۰۰ عددی", "price": 150, "diamonds": 100},
@@ -80,6 +80,7 @@ class Bomber:
         self.fail = 0
 
     def load_services(self):
+        # ⚠️ لیست سرویس‌ها
         self.services = [
             {'name': 'Digikala Jet', 'url': 'https://api.digikalajet.ir/user/login-register/', 'method': 'POST', 'data': lambda: {"phone": self.phone_number}, 'json': True},
         ]
@@ -419,6 +420,11 @@ def kb_admin(message):
     )
     bot.reply_to(message, "👑 **پنل مدیریت**", reply_markup=markup, parse_mode='Markdown')
 
+@bot.message_handler(commands=['admin'])
+def cmd_admin(message):
+    if message.from_user.id != ADMIN_ID: return
+    kb_admin(message)
+
 # ==========================================
 # 8. هندلرهای منو (Callback Queries)
 # ==========================================
@@ -592,147 +598,4 @@ def send_broadcast(message):
     conn.close()
     count = 0
     for u in users:
-        try: bot.send_message(u[0], f"📢 {message.text}"); count += 1; time.sleep(0.1)
-        except: pass
-    bot.reply_to(message, f"✅ ارسال به {count} نفر.")
-
-def process_bulk_charge(message):
-    if message.from_user.id != ADMIN_ID: return
-    try:
-        amount = int(message.text.strip())
-        if amount <= 0: return
-        conn = sqlite3.connect(DB_FILE)
-        c = conn.cursor()
-        c.execute("UPDATE users SET diamonds = diamonds + ?", (amount,))
-        conn.commit()
-        c.execute("SELECT user_id FROM users")
-        users = c.fetchall()
-        conn.close()
-        for u in users:
-            try: bot.send_message(u[0], f"💎 **هدیه!**\n{amount} الماس اضافه شد.", parse_mode='Markdown'); time.sleep(0.05)
-            except: pass
-        bot.send_message(ADMIN_ID, f"✅ شارژ انجام شد.")
-    except: pass
-
-def process_bulk_deduct(message):
-    if message.from_user.id != ADMIN_ID: return
-    try:
-        amount = int(message.text.strip())
-        if amount <= 0: return
-        conn = sqlite3.connect(DB_FILE)
-        c = conn.cursor()
-        c.execute("UPDATE users SET diamonds = MAX(0, diamonds - ?)", (amount,))
-        conn.commit()
-        conn.close()
-        bot.send_message(ADMIN_ID, f"✅ کسر همگانی انجام شد.\n{amount} الماس کم شد.")
-    except: pass
-
-def process_make_gift(message):
-    try:
-        parts = message.text.split()
-        active_gift_codes[parts[0].upper()] = {"uses": int(parts[1]), "diamonds": 5}
-        bot.reply_to(message, f"✅ کد ساخته شد.")
-    except: bot.reply_to(message, "❌ فرمت اشتباه.")
-
-def view_user_admin(message):
-    uid = message.text.strip()
-    user = get_user(uid)
-    if user:
-        bot.reply_to(message, f"👤 {user['name']}\n💎 {user['plan']}\n💎 {user['diamonds']} الماس")
-    else: bot.reply_to(message, "❌ کاربر یافت نشد.")
-
-def send_reply_to_user(message, target_user):
-    try:
-        bot.send_message(target_user, f"📩 **پاسخ پشتیبانی:**\n\n{message.text}", parse_mode='Markdown')
-        bot.reply_to(message, "✅ پاسخ ارسال شد.")
-    except: bot.reply_to(message, "❌ خطا.")
-
-@bot.message_handler(content_types=['photo'])
-def handle_photo(message):
-    user_id = str(message.from_user.id)
-    if "selected_plan" not in user_states.get(user_id, {}):
-        bot.reply_to(message, "⚠️ ابتدا از منو یک پلن انتخاب کنید.")
-        return
-    plan_key = user_states[user_id]["selected_plan"]
-    plan = PLANS[plan_key]
-    req_id = f"{user_id}_{int(time.time())}"
-    pending_approvals[req_id] = {"user_id": user_id, "plan": plan_key}
-    bot.reply_to(message, "✅ رسید دریافت شد. منتظر تایید باشید.")
-    markup = types.InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        types.InlineKeyboardButton("✅ تایید", callback_data=f"admin_approve_{req_id}"),
-        types.InlineKeyboardButton("❌ رد", callback_data=f"admin_reject_{req_id}")
-    )
-    bot.send_message(ADMIN_ID, f"📩 **رسید:**\nکاربر: `{user_id}`\nپلن: **{plan['name']}**", reply_markup=markup, parse_mode='Markdown')
-    bot.forward_message(ADMIN_ID, message.chat.id, message.message_id)
-    del user_states[user_id]
-
-@bot.message_handler(func=lambda message: str(message.from_user.id) in user_states)
-def process_text_inputs(message):
-    user_id = str(message.from_user.id)
-    state = user_states[user_id].get("state")
-    user = get_user(user_id)
-    
-    if message.text == "لغو":
-        del user_states[user_id]
-        bot.reply_to(message, "عملیات لغو شد.", reply_markup=get_main_menu())
-        return
-    
-    if state == "waiting_for_name":
-        user['name'] = message.text
-        save_user(**user)
-        bot.reply_to(message, "✅ نام تغییر کرد.")
-        del user_states[user_id]
-
-    elif state == "waiting_for_support":
-        markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("✍️ پاسخ", callback_data=f"admin_reply_{user_id}"))
-        bot.send_message(ADMIN_ID, f"🎧 پیام از `{user_id}`:\n\n{message.text}", reply_markup=markup)
-        bot.reply_to(message, "✅ پیام ارسال شد.")
-        del user_states[user_id]
-
-    elif state == "waiting_for_phone":
-        phones = message.text.strip().replace(" ", "").split(",")
-        if any(len(p) < 10 or not p.isdigit() for p in phones):
-            bot.reply_to(message, "❌ فرمت نامعتبر. (مثال: 09123456789)")
-            return
-        today = datetime.now().strftime("%Y-%m-%d")
-        if user['last_bomb_date'] != today:
-            user['last_bomb_date'] = today
-            user['daily_bomb_count'] = 0
-        if user['daily_bomb_count'] >= 5 and user['plan'] != 'vip':
-            bot.reply_to(message, "❌ سهمیه پر شده!")
-            del user_states[user_id]
-            return
-        if user['plan'] == "vip" and user['sub_expiry'] > time.time(): pass
-        elif user['diamonds'] < len(phones):
-            bot.reply_to(message, f"❌ الماس کافی ندارید! (نیاز: {len(phones)} الماس)")
-            del user_states[user_id]
-            return
-        else: user['diamonds'] -= len(phones)
-        user['daily_bomb_count'] += len(phones)
-        save_user(**user)
-        del user_states[user_id]
-        bot.reply_to(message, f"🚀 **شروع شد!** هدف: `{len(phones)}` شماره", parse_mode='Markdown')
-        bomber = Bomber(",".join(phones), user_id)
-        active_bombers[user_id] = bomber
-        threading.Thread(target=bomber.start).start()
-
-    elif state == "waiting_for_gift":
-        code = message.text.strip().upper()
-        del user_states[user_id]
-        if code in active_gift_codes and active_gift_codes[code]["uses"] > 0:
-            amount = active_gift_codes[code]["diamonds"]
-            active_gift_codes[code]["uses"] -= 1
-            user['diamonds'] += amount
-            save_user(**user)
-            bot.reply_to(message, f"💎 {amount} الماس اضافه شد.")
-        else:
-            bot.reply_to(message, "❌ کد نامعتبر.")
-
-if __name__ == "__main__":
-    try:
-        threading.Thread(target=lambda: app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 8080)), use_reloader=False), daemon=True).start()
-        print("🤖 Bot & Web Server running...")
-        bot.infinity_polling()
-    except Exception as e:
-        traceback.print_exc()
+        try: bot.send_message(u[0], f"📢 {message.text}"); count += 1; time.sleep(0.1
