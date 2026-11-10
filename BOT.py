@@ -15,8 +15,7 @@ from datetime import datetime
 # ==========================================
 BOT_TOKEN = os.environ.get('BOT_TOKEN', 'YOUR_BOT_TOKEN_HERE')
 ADMIN_ID = 6914309071
-OWNER_USERNAME = "@Im_Patrick" # اینجا آیدی خودت رو بذار
-#CARD_NUMBER = "0000-0000-0000-0000"
+OWNER_USERNAME = "@Im_Patrick"
 DB_FILE = "bot_database.db"
 PANEL_IMAGE_URL = "https://i.imgur.com/Z7lvgzO.jpeg"
 CHANNEL_1 = "@Blood_Bomber"
@@ -91,7 +90,7 @@ init_db()
 # 3. توابع دیتابیس
 # ==========================================
 def get_user(user_id):
-    user_id = str(user_id).strip()
+    user_id = str(user_id).strip().replace("@", "")
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
@@ -185,7 +184,7 @@ def send_join_message(chat_id):
                      reply_markup=m, parse_mode='Markdown')
 
 # ==========================================
-# 6. بمبر (با نوار وضعیت زنده، تایید شماره و دکمه توقف)
+# 6. بمبر
 # ==========================================
 class Bomber:
     def __init__(self, phone, user_id, sms_limit, silent_mode=False):
@@ -377,24 +376,7 @@ def get_admin_menu():
     m.add(types.InlineKeyboardButton("🔑 ساخت کد هدیه", callback_data="admin_make_gift"),
           types.InlineKeyboardButton("📋 تیکت‌های باز", callback_data="admin_tickets"))
     m.add(types.InlineKeyboardButton("💾 بکاپ دیتابیس", callback_data="admin_backup"))
-    return m
-
-# ==========================================
-# 9. start / admin / stop_bomb
-# ==========================================
-@bot.message_handler(commands=['start'])
-def cmd_start(message):
-    uid = str(message.from_user.id)
-    if not is_user_joined(uid):
-        send_join_message(message.chat.id)
-        return
-
-    u = get_user(uid)
-    if not u:
-        args = message.text.split()
-        ref_by = None
-        if len(args) > 1 and args[1].startswith("ref_"):
-# ==========================================            
+    # ==========================================
 # 9. start / admin / stop_bomb
 # ==========================================
 @bot.message_handler(commands=['start'])
@@ -650,7 +632,7 @@ def on_callback(call):
         
         m = types.InlineKeyboardMarkup(row_width=1)
         # دکمه هدایت به پیوی ادمین
-        m.add(types.InlineKeyboardButton("💬 جهت خرید به پیوی ادمین مراجعه کنید", url="https://t.me/Im_Patrick"))
+        m.add(types.InlineKeyboardButton("💬 جهت خرید به پیوی ادمین مراجعه کنید", url=f"https://t.me/{OWNER_USERNAME.replace('@', '')}"))
         m.add(types.InlineKeyboardButton("🔙 انصراف", callback_data="menu_wallet"))
         
         text = (f"💳 درخواست شارژ **{fmt(amt)} تومان**\n\n"
@@ -1185,7 +1167,7 @@ def on_text(message):
         
         # دکمه هدایت به پیوی ادمین
         m = types.InlineKeyboardMarkup(row_width=1)
-        m.add(types.InlineKeyboardButton("💬 جهت خرید به پیوی ادمین مراجعه کنید", url="https://t.me/Im_Patrick"))
+        m.add(types.InlineKeyboardButton("💬 جهت خرید به پیوی ادمین مراجعه کنید", url=f"https://t.me/{OWNER_USERNAME.replace('@', '')}"))
         
         bot.send_message(message.chat.id, 
             f"✅ مبلغ **{fmt(amt)} تومان** ثبت شد.\n\n"
@@ -1349,9 +1331,7 @@ def on_text(message):
         user_states.pop(uid, None)
         bot.send_message(message.chat.id, "✅ محصول اضافه شد!")
 
-    # --- اصلاح باگ جستجو و شارژ دستی ---
     elif st == "admin_charge_id":
-        # پاک کردن فاصله‌های اضافه از آیدی
         target = text.strip().replace("@", "")
         user_states[uid] = {"state": "admin_charge_amt", "target": target}
         bot.send_message(message.chat.id, f"💰 مبلغ شارژ برای کاربر `{target}` را وارد کن (تومان):", parse_mode='Markdown')
@@ -1394,7 +1374,6 @@ def on_text(message):
         bot.send_message(message.chat.id, f"✅ {sent} کاربر.")
         user_states.pop(uid, None)
 
-    # --- اصلاح باگ جستجوی کاربر ---
     elif st == "admin_search":
         target = text.strip().replace("@", "")
         tu = get_user(target)
@@ -1501,4 +1480,5 @@ def on_text(message):
 if __name__ == "__main__":
     print("Bot starting...")
     bot.infinity_polling(timeout=30, long_polling_timeout=30)
-            ref
+    
+    return m
