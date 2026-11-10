@@ -359,6 +359,7 @@ def get_main_menu():
           types.InlineKeyboardButton("👥 دعوت دوستان", callback_data="menu_referral"))
     m.add(types.InlineKeyboardButton("📜 تاریخچه خرید", callback_data="menu_history"),
           types.InlineKeyboardButton("🎫 پشتیبانی", callback_data="menu_support"))
+    return m
 
 def get_admin_menu():
     m = types.InlineKeyboardMarkup(row_width=2)
@@ -368,14 +369,16 @@ def get_admin_menu():
           types.InlineKeyboardButton("🚫 مسدود/آزاد", callback_data="admin_ban"))
     m.add(types.InlineKeyboardButton("💰 شارژ دستی", callback_data="admin_manual_charge"),
           types.InlineKeyboardButton("⏳ شارژ زمانی", callback_data="admin_time_charge"))
-    m.add(types.InlineKeyboardButton("📢 پیام همگانی", callback_data="admin_broadcast"),
+    m.add(types.InlineKeyboardButton("⌛ کسر زمانی", callback_data="admin_time_deduct"),
           types.InlineKeyboardButton("➕ شارژ همگانی", callback_data="admin_bulk_charge"))
     m.add(types.InlineKeyboardButton("➖ کسر همگانی", callback_data="admin_bulk_deduct"),
-          types.InlineKeyboardButton("➕ افزودن محصول", callback_data="admin_add_product"))
-    m.add(types.InlineKeyboardButton("🗑 حذف محصول", callback_data="admin_del_product"),
-          types.InlineKeyboardButton("🔑 ساخت کد هدیه", callback_data="admin_make_gift"))
-    m.add(types.InlineKeyboardButton("📋 تیکت‌های باز", callback_data="admin_tickets"),
-          types.InlineKeyboardButton("💾 بکاپ دیتابیس", callback_data="admin_backup"))
+          types.InlineKeyboardButton("📢 پیام همگانی", callback_data="admin_broadcast"))
+    m.add(types.InlineKeyboardButton("➕ افزودن محصول", callback_data="admin_add_product"),
+          types.InlineKeyboardButton("🗑 حذف محصول", callback_data="admin_del_product"))
+    m.add(types.InlineKeyboardButton("🔑 ساخت کد هدیه", callback_data="admin_make_gift"),
+          types.InlineKeyboardButton("📋 تیکت‌های باز", callback_data="admin_tickets"))
+    m.add(types.InlineKeyboardButton("💾 بکاپ دیتابیس", callback_data="admin_backup"))
+    return m
     # ==========================================
 # 9. start / admin / stop_bomb
 # ==========================================
