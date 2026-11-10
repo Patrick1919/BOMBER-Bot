@@ -1,6 +1,12 @@
 phone = "+989120000000"
 SERVICES_LIST = [
     {'name': 'Digikala Jet', 'url': 'https://api.digikalajet.ir/user/login-register/', 'method': 'POST', 'data': lambda phone: {"phone": phone}, 'json': True},
+    {'name': 'iranian', 'url': 'https://iranian-style.com/wp-admin/admin-ajax.php', 'method': 'POST', 'data': lambda phone: {"phone": phone}, 'json': True},
+    {'name': 'poshakhaytan', 'url': 'https://poshakhaytan.com/mobileRegister', 'method': 'POST', 'data': lambda phone: {"phone": phone}, 'json': True},
+    {'name': 'Poshak99', 'url': 'https://poshak99.ir/wp-admin/admin-ajax.php', 'method': 'POST', 'data': lambda phone: {"phone": phone}, 'json': True},
+    {'name': 'poshaktehran', 'url': 'https://poshaktehran.com/wp-admin/admin-ajax.php', 'method': 'POST', 'data': lambda phone: {"phone": phone}, 'json': True},
+    {'name': 'pooshakmahdi', 'url': 'https://pooshakmahdi.com/wp-admin/admin-ajax.php', 'method': 'POST', 'data': lambda phone: {"phone": phone}, 'json': True},
+    {'name': 'Digikala Jet', 'url': '', 'method': 'POST', 'data': lambda phone: {"phone": phone}, 'json': True},
     {'name': 'Limoome', 'url': 'https://my.limoome.com/api/auth/login/otp', 'method': 'POST', 'data': lambda phone: {"mobileNumber": phone.split("+98")[1], "country": "1"}, 'json': False},
     {'name': 'Jabama', 'url': 'https://taraazws.jabama.com/api/v4/account/send-code', 'method': 'POST', 'data': lambda phone: {"mobile": phone}, 'json': True},
     {'name': 'SimKhan First', 'url': 'https://www.simkhanapi.ir/api/users/registerV2', 'method': 'POST', 'data': lambda phone: {"mobileNumber": "0" + phone.split("+98")[1], "ReSendSMS": False}, 'json': True},
