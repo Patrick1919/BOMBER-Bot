@@ -1480,5 +1480,3 @@ def on_text(message):
 if __name__ == "__main__":
     print("Bot starting...")
     bot.infinity_polling(timeout=30, long_polling_timeout=30)
-    
-    return m
