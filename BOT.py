@@ -16,10 +16,10 @@ from datetime import datetime
 BOT_TOKEN = os.environ.get('BOT_TOKEN', 'YOUR_BOT_TOKEN_HERE')
 ADMIN_ID = 6914309071
 OWNER_USERNAME = "@Im_Patrick"
-CARD_NUMBER = "0000-0000-0000-0000"
+CARD_NUMBER = "@lm_Patrick جهت پرداخت به پیوی ادمین مراجعه کنید"
 DB_FILE = "bot_database.db"
 PANEL_IMAGE_URL = "https://i.imgur.com/Z7lvgzO.jpeg"
-CHANNEL_1 = "@BloodBomber_Chanel"
+CHANNEL_1 = "@Blood_Bomber"
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
@@ -207,13 +207,11 @@ class Bomber:
             if self.sent_total >= self.sms_limit:
                 self.stop_event.set()
                 return
-
         try:
             data = svc['data'](self.phone)
             headers = {'User-Agent': random.choice(USER_AGENTS)}
             method = svc['method'].upper()
             
-            # استفاده از Session جداگانه برای جلوگیری از خرابی APIها
             with requests.Session() as session:
                 if method == 'POST':
                     if svc.get('json', False):
@@ -229,6 +227,8 @@ class Bomber:
                     self.sent_total += 1
                     if self.sent_total >= self.sms_limit:
                         self.stop_event.set()
+            elif r.status_code in (400, 401, 403, 404, 422):
+                pass
             else:
                 with self.lock:
                     self.fail += 1
@@ -237,7 +237,6 @@ class Bomber:
                 self.fail += 1
 
     def _worker(self):
-        # لوپ بی‌نهایت تا زمان رسیدن به سقف پیامک
         while not self.stop_event.is_set():
             for svc in self.services:
                 if self.stop_event.is_set():
@@ -255,7 +254,6 @@ class Bomber:
 
             self.success = self.fail = self.sent_total = 0
             
-            # دکمه توقف
             stop_markup = types.InlineKeyboardMarkup()
             stop_markup.add(types.InlineKeyboardButton("⏹ توقف ارسال", callback_data="stop_bomb_btn"))
 
@@ -271,7 +269,6 @@ class Bomber:
 
             last_update = time.time()
             
-            # لوپ اصلی برای آپدیت نوار وضعیت
             while any(t.is_alive() for t in threads):
                 if self.stop_event.is_set():
                     break
@@ -565,7 +562,6 @@ def on_callback(call):
     elif data.startswith("confirm_start_"):
         num = data.replace("confirm_start_", "")
         
-        # بررسی‌های امنیتی دوباره
         if u['plan'] == "free" and u['free_trial_used']:
             bot.answer_callback_query(call.id, "❌ تست رایگان تمام شد!", show_alert=True)
             return
@@ -1112,8 +1108,7 @@ def on_callback(call):
             bot.send_message(call.message.chat.id, f"❌ خطا: {e}")
 
     else:
-        bot.answer_callback_query(call.id, "در حال توسعه...")
-        # ==========================================
+        bot.answer_callback_query(call.id, "در حال توسعه...# ==========================================
 # 12. عکس (رسید)
 # ==========================================
 @bot.message_handler(content_types=['photo'])
@@ -1152,7 +1147,6 @@ def on_text(message):
     st = user_states.get(uid, {}).get("state")
     u = get_user(uid)
 
-    # --- کاستوم کیف پول ---
     if st == "wait_custom_amount":
         try:
             amt = int(text.replace(",", "").strip())
@@ -1169,7 +1163,6 @@ def on_text(message):
             f"حالا مبلغ را به کارت زیر واریز کرده و **عکس رسید** را بفرستید:\n\n"
             f"`{CARD_NUMBER}`", parse_mode='Markdown')
 
-    # --- بمبر ---
     elif st == "wait_phone":
         if not u:
             user_states.pop(uid, None)
@@ -1182,7 +1175,6 @@ def on_text(message):
         plan_info = PLANS.get(u['plan'], PLANS['free'])
         sms = plan_info['sms_per_run']
 
-        # ذخیره شماره در استیت و نمایش پیام تایید
         user_states[uid] = {"state": "confirm_bomb", "phone": num}
         
         m = types.InlineKeyboardMarkup(row_width=2)
@@ -1327,7 +1319,6 @@ def on_text(message):
         user_states.pop(uid, None)
         bot.send_message(message.chat.id, "✅ محصول اضافه شد!")
 
-    # --- ادمین: شارژ دستی (اصلاح شده) ---
     elif st == "admin_charge_id":
         target = text.strip()
         user_states[uid] = {"state": "admin_charge_amt", "target": target}
@@ -1476,4 +1467,5 @@ def on_text(message):
 # ==========================================
 if __name__ == "__main__":
     print("Bot starting...")
-    bot.infinity_polling(timeout=30, long_polling_timeout=30)
+    bot.infinity_polling(timeout=30, long_polling_timeout=30)")
+        
