@@ -1108,7 +1108,8 @@ def on_callback(call):
             bot.send_message(call.message.chat.id, f"❌ خطا: {e}")
 
     else:
-        bot.answer_callback_query(call.id, "در حال توسعه...# ==========================================
+        bot.answer_callback_query(call.id, "در حال توسعه...
+# ==========================================        
 # 12. عکس (رسید)
 # ==========================================
 @bot.message_handler(content_types=['photo'])
