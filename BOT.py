@@ -16,7 +16,7 @@ from datetime import datetime
 BOT_TOKEN = os.environ.get('BOT_TOKEN', 'YOUR_BOT_TOKEN_HERE')
 ADMIN_ID = 6914309071
 OWNER_USERNAME = "@Im_Patrick"
-CARD_NUMBER = "@lm_Patrick جهت پرداخت به پیوی ادمین مراجعه کنید"
+CARD_NUMBER = "@lm_Patrick جهت پرداخت به پیوی ادمین مراجعه کنید "
 DB_FILE = "bot_database.db"
 PANEL_IMAGE_URL = "https://i.imgur.com/Z7lvgzO.jpeg"
 CHANNEL_1 = "@Blood_Bomber"
@@ -1108,7 +1108,7 @@ def on_callback(call):
             bot.send_message(call.message.chat.id, f"❌ خطا: {e}")
 
     else:
-        bot.answer_callback_query(call.id, "در حال توسعه...
+        bot.answer_callback_query(call.id, "در حال توسعه...")
 # ==========================================        
 # 12. عکس (رسید)
 # ==========================================
@@ -1468,5 +1468,5 @@ def on_text(message):
 # ==========================================
 if __name__ == "__main__":
     print("Bot starting...")
-    bot.infinity_polling(timeout=30, long_polling_timeout=30)")
-        
+    bot.infinity_polling(timeout=30, long_polling_timeout=30)
+
