@@ -359,7 +359,6 @@ def get_main_menu():
           types.InlineKeyboardButton("👥 دعوت دوستان", callback_data="menu_referral"))
     m.add(types.InlineKeyboardButton("📜 تاریخچه خرید", callback_data="menu_history"),
           types.InlineKeyboardButton("🎫 پشتیبانی", callback_data="menu_support"))
-    return m
 
 def get_admin_menu():
     m = types.InlineKeyboardMarkup(row_width=2)
