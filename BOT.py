@@ -15,7 +15,7 @@ from datetime import datetime
 # ==========================================
 BOT_TOKEN = os.environ.get('BOT_TOKEN', 'YOUR_BOT_TOKEN_HERE')
 ADMIN_ID = 6914309071
-OWNER_USERNAME = "@Im_Patrick"
+OWNER_USERNAME = "@lm_Patrick"
 DB_FILE = "bot_database.db"
 PANEL_IMAGE_URL = "https://i.imgur.com/Z7lvgzO.jpeg"
 CHANNEL_1 = "@Blood_Bomber"
