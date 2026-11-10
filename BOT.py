@@ -368,14 +368,15 @@ def get_admin_menu():
     m.add(types.InlineKeyboardButton("🔎 جستجوی کاربر", callback_data="admin_search_user"),
           types.InlineKeyboardButton("🚫 مسدود/آزاد", callback_data="admin_ban"))
     m.add(types.InlineKeyboardButton("💰 شارژ دستی", callback_data="admin_manual_charge"),
-          types.InlineKeyboardButton("📢 پیام همگانی", callback_data="admin_broadcast"))
-    m.add(types.InlineKeyboardButton("➕ شارژ همگانی", callback_data="admin_bulk_charge"),
-          types.InlineKeyboardButton("➖ کسر همگانی", callback_data="admin_bulk_deduct"))
-    m.add(types.InlineKeyboardButton("➕ افزودن محصول", callback_data="admin_add_product"),
-          types.InlineKeyboardButton("🗑 حذف محصول", callback_data="admin_del_product"))
-    m.add(types.InlineKeyboardButton("🔑 ساخت کد هدیه", callback_data="admin_make_gift"),
-          types.InlineKeyboardButton("📋 تیکت‌های باز", callback_data="admin_tickets"))
-    m.add(types.InlineKeyboardButton("💾 بکاپ دیتابیس", callback_data="admin_backup"))
+          types.InlineKeyboardButton("⏳ شارژ زمانی", callback_data="admin_time_charge"))
+    m.add(types.InlineKeyboardButton("📢 پیام همگانی", callback_data="admin_broadcast"),
+          types.InlineKeyboardButton("➕ شارژ همگانی", callback_data="admin_bulk_charge"))
+    m.add(types.InlineKeyboardButton("➖ کسر همگانی", callback_data="admin_bulk_deduct"),
+          types.InlineKeyboardButton("➕ افزودن محصول", callback_data="admin_add_product"))
+    m.add(types.InlineKeyboardButton("🗑 حذف محصول", callback_data="admin_del_product"),
+          types.InlineKeyboardButton("🔑 ساخت کد هدیه", callback_data="admin_make_gift"))
+    m.add(types.InlineKeyboardButton("📋 تیکت‌های باز", callback_data="admin_tickets"),
+          types.InlineKeyboardButton("💾 بکاپ دیتابیس", callback_data="admin_backup"))
     # ==========================================
 # 9. start / admin / stop_bomb
 # ==========================================
@@ -631,7 +632,6 @@ def on_callback(call):
         user_states[uid] = {"state": "wait_receipt", "amount": amt}
         
         m = types.InlineKeyboardMarkup(row_width=1)
-        # دکمه هدایت به پیوی ادمین
         m.add(types.InlineKeyboardButton("💬 جهت خرید به پیوی ادمین مراجعه کنید", url=f"https://t.me/{OWNER_USERNAME.replace('@', '')}"))
         m.add(types.InlineKeyboardButton("🔙 انصراف", callback_data="menu_wallet"))
         
@@ -993,6 +993,14 @@ def on_callback(call):
         user_states[uid] = {"state": "admin_charge_id"}
         bot.send_message(call.message.chat.id, "🆔 آیدی عددی کاربر (بدون @):")
 
+    elif data == "admin_time_charge":
+        user_states[uid] = {"state": "admin_time_id"}
+        bot.send_message(call.message.chat.id, "🆔 آیدی عددی کاربر برای **شارژ زمانی** (بدون @):")
+
+    elif data == "admin_time_deduct":
+        user_states[uid] = {"state": "admin_time_deduct_id"}
+        bot.send_message(call.message.chat.id, "🆔 آیدی عددی کاربر برای **کسر زمانی** (بدون @):")
+
     elif data == "admin_broadcast":
         user_states[uid] = {"state": "admin_bcast"}
         bot.send_message(call.message.chat.id, "📢 متن پیام:")
@@ -1165,7 +1173,6 @@ def on_text(message):
         
         user_states[uid] = {"state": "wait_receipt", "amount": amt}
         
-        # دکمه هدایت به پیوی ادمین
         m = types.InlineKeyboardMarkup(row_width=1)
         m.add(types.InlineKeyboardButton("💬 جهت خرید به پیوی ادمین مراجعه کنید", url=f"https://t.me/{OWNER_USERNAME.replace('@', '')}"))
         
@@ -1357,6 +1364,66 @@ def on_text(message):
             bot.send_message(message.chat.id, f"❌ کاربر با آیدی `{target}` یافت نشد.")
         user_states.pop(uid, None)
 
+    # --- شارژ زمانی ---
+    elif st == "admin_time_id":
+        target = text.strip().replace("@", "")
+        user_states[uid] = {"state": "admin_time_days", "target": target}
+        bot.send_message(message.chat.id, f"📅 چند **روز** به اشتراک کاربر `{target}` اضافه شود؟", parse_mode='Markdown')
+
+    elif st == "admin_time_days":
+        try:
+            days = int(text)
+            if days <= 0:
+                raise ValueError
+        except ValueError:
+            bot.send_message(message.chat.id, "❌ لطفاً یک عدد مثبت وارد کنید.")
+            return
+        target = user_states[uid]["target"]
+        tu = get_user(target)
+        if tu:
+            now = time.time()
+            current_expiry = tu['sub_expiry'] if tu['sub_expiry'] > now else now
+            tu['sub_expiry'] = current_expiry + (days * 86400)
+            save_user(**tu)
+            bot.send_message(message.chat.id, f"✅ **{days} روز** به اشتراک `{target}` اضافه شد.", parse_mode='Markdown')
+            try:
+                bot.send_message(target, f"👑 **اشتراک شما شارژ زمانی شد!**\n🎁 {days} روز به اعتبار اشتراک شما اضافه شد.", parse_mode='Markdown')
+            except Exception:
+                pass
+        else:
+            bot.send_message(message.chat.id, f"❌ کاربر با آیدی `{target}` یافت نشد.")
+        user_states.pop(uid, None)
+
+    # --- کسر زمانی ---
+    elif st == "admin_time_deduct_id":
+        target = text.strip().replace("@", "")
+        user_states[uid] = {"state": "admin_time_deduct_days", "target": target}
+        bot.send_message(message.chat.id, f"📅 چند **روز** از اشتراک کاربر `{target}` کم شود؟", parse_mode='Markdown')
+
+    elif st == "admin_time_deduct_days":
+        try:
+            days = int(text)
+            if days <= 0:
+                raise ValueError
+        except ValueError:
+            bot.send_message(message.chat.id, "❌ لطفاً یک عدد مثبت وارد کنید.")
+            return
+        target = user_states[uid]["target"]
+        tu = get_user(target)
+        if tu:
+            tu['sub_expiry'] -= (days * 86400)
+            if tu['sub_expiry'] < time.time():
+                tu['sub_expiry'] = 0
+            save_user(**tu)
+            bot.send_message(message.chat.id, f"✅ **{days} روز** از اشتراک `{target}` کم شد.", parse_mode='Markdown')
+            try:
+                bot.send_message(target, f"⚠️ **کسر زمانی!**\n{days} روز از اعتبار اشتراک شما کم شد.", parse_mode='Markdown')
+            except Exception:
+                pass
+        else:
+            bot.send_message(message.chat.id, f"❌ کاربر با آیدی `{target}` یافت نشد.")
+        user_states.pop(uid, None)
+
     elif st == "admin_bcast":
         conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
@@ -1480,3 +1547,4 @@ def on_text(message):
 if __name__ == "__main__":
     print("Bot starting...")
     bot.infinity_polling(timeout=30, long_polling_timeout=30)
+    return m
