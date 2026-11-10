@@ -15,8 +15,8 @@ from datetime import datetime
 # ==========================================
 BOT_TOKEN = os.environ.get('BOT_TOKEN', 'YOUR_BOT_TOKEN_HERE')
 ADMIN_ID = 6914309071
-OWNER_USERNAME = "@Im_Patrick"
-CARD_NUMBER = "@lm_Patrick جهت پرداخت به پیوی ادمین مراجعه کنید "
+OWNER_USERNAME = "@Im_Patrick" # اینجا آیدی خودت رو بذار
+#CARD_NUMBER = "0000-0000-0000-0000"
 DB_FILE = "bot_database.db"
 PANEL_IMAGE_URL = "https://i.imgur.com/Z7lvgzO.jpeg"
 CHANNEL_1 = "@Blood_Bomber"
@@ -394,6 +394,21 @@ def cmd_start(message):
         args = message.text.split()
         ref_by = None
         if len(args) > 1 and args[1].startswith("ref_"):
+# ==========================================            
+# 9. start / admin / stop_bomb
+# ==========================================
+@bot.message_handler(commands=['start'])
+def cmd_start(message):
+    uid = str(message.from_user.id)
+    if not is_user_joined(uid):
+        send_join_message(message.chat.id)
+        return
+
+    u = get_user(uid)
+    if not u:
+        args = message.text.split()
+        ref_by = None
+        if len(args) > 1 and args[1].startswith("ref_"):
             ref_by = args[1].replace("ref_", "")
             ref_user = get_user(ref_by)
             if ref_user and ref_by != uid:
@@ -632,9 +647,16 @@ def on_callback(call):
     elif data.startswith("charge_amt_"):
         amt = int(data.replace("charge_amt_", ""))
         user_states[uid] = {"state": "wait_receipt", "amount": amt}
-        m = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 انصراف", callback_data="menu_wallet"))
-        text = (f"💳 مبلغ **{fmt(amt)} تومان** را به کارت زیر واریز کرده و **عکس رسید** را بفرستید:\n\n"
-                f"`{CARD_NUMBER}`")
+        
+        m = types.InlineKeyboardMarkup(row_width=1)
+        # دکمه هدایت به پیوی ادمین
+        m.add(types.InlineKeyboardButton("💬 جهت خرید به پیوی ادمین مراجعه کنید", url="https://t.me/Im_Patrick"))
+        m.add(types.InlineKeyboardButton("🔙 انصراف", callback_data="menu_wallet"))
+        
+        text = (f"💳 درخواست شارژ **{fmt(amt)} تومان**\n\n"
+                f"لطفاً جهت پرداخت و هماهنگی، به پیوی ادمین مراجعه کنید.\n"
+                f"پس از پرداخت، **عکس رسید** را در همین ربات ارسال کنید تا کیف پول شما شارژ شود.")
+        
         bot.edit_message_caption(text, call.message.chat.id, call.message.message_id,
                                  reply_markup=m, parse_mode='Markdown')
 
@@ -979,15 +1001,15 @@ def on_callback(call):
 
     elif data == "admin_search_user":
         user_states[uid] = {"state": "admin_search"}
-        bot.send_message(call.message.chat.id, "🆔 آیدی کاربر:")
+        bot.send_message(call.message.chat.id, "🆔 آیدی عددی کاربر را وارد کنید (بدون @):")
 
     elif data == "admin_ban":
         user_states[uid] = {"state": "admin_ban_id"}
-        bot.send_message(call.message.chat.id, "🚫 آیدی برای مسدود/آزاد:")
+        bot.send_message(call.message.chat.id, "🚫 آیدی عددی برای مسدود/آزاد (بدون @):")
 
     elif data == "admin_manual_charge":
         user_states[uid] = {"state": "admin_charge_id"}
-        bot.send_message(call.message.chat.id, "🆔 آیدی کاربر:")
+        bot.send_message(call.message.chat.id, "🆔 آیدی عددی کاربر (بدون @):")
 
     elif data == "admin_broadcast":
         user_states[uid] = {"state": "admin_bcast"}
@@ -1109,7 +1131,8 @@ def on_callback(call):
 
     else:
         bot.answer_callback_query(call.id, "در حال توسعه...")
-# ==========================================        
+
+# ==========================================
 # 12. عکس (رسید)
 # ==========================================
 @bot.message_handler(content_types=['photo'])
@@ -1159,10 +1182,16 @@ def on_text(message):
             return
         
         user_states[uid] = {"state": "wait_receipt", "amount": amt}
+        
+        # دکمه هدایت به پیوی ادمین
+        m = types.InlineKeyboardMarkup(row_width=1)
+        m.add(types.InlineKeyboardButton("💬 جهت خرید به پیوی ادمین مراجعه کنید", url="https://t.me/Im_Patrick"))
+        
         bot.send_message(message.chat.id, 
             f"✅ مبلغ **{fmt(amt)} تومان** ثبت شد.\n\n"
-            f"حالا مبلغ را به کارت زیر واریز کرده و **عکس رسید** را بفرستید:\n\n"
-            f"`{CARD_NUMBER}`", parse_mode='Markdown')
+            f"لطفاً جهت پرداخت و هماهنگی، به پیوی ادمین مراجعه کنید.\n"
+            f"پس از پرداخت، **عکس رسید** را در همین ربات ارسال کنید.", 
+            reply_markup=m, parse_mode='Markdown')
 
     elif st == "wait_phone":
         if not u:
@@ -1320,8 +1349,10 @@ def on_text(message):
         user_states.pop(uid, None)
         bot.send_message(message.chat.id, "✅ محصول اضافه شد!")
 
+    # --- اصلاح باگ جستجو و شارژ دستی ---
     elif st == "admin_charge_id":
-        target = text.strip()
+        # پاک کردن فاصله‌های اضافه از آیدی
+        target = text.strip().replace("@", "")
         user_states[uid] = {"state": "admin_charge_amt", "target": target}
         bot.send_message(message.chat.id, f"💰 مبلغ شارژ برای کاربر `{target}` را وارد کن (تومان):", parse_mode='Markdown')
 
@@ -1363,8 +1394,9 @@ def on_text(message):
         bot.send_message(message.chat.id, f"✅ {sent} کاربر.")
         user_states.pop(uid, None)
 
+    # --- اصلاح باگ جستجوی کاربر ---
     elif st == "admin_search":
-        target = text.strip()
+        target = text.strip().replace("@", "")
         tu = get_user(target)
         if tu:
             bot.send_message(message.chat.id,
@@ -1375,11 +1407,11 @@ def on_text(message):
                 f"🚫 {'بله' if tu['is_banned'] else 'خیر'}",
                 parse_mode='Markdown')
         else:
-            bot.send_message(message.chat.id, "❌ یافت نشد.")
+            bot.send_message(message.chat.id, f"❌ کاربر با آیدی `{target}` یافت نشد.")
         user_states.pop(uid, None)
 
     elif st == "admin_ban_id":
-        target = text.strip()
+        target = text.strip().replace("@", "")
         tu = get_user(target)
         if tu:
             tu['is_banned'] = 1 - tu['is_banned']
@@ -1387,7 +1419,7 @@ def on_text(message):
             s = "مسدود" if tu['is_banned'] else "آزاد"
             bot.send_message(message.chat.id, f"✅ {target} {s} شد.")
         else:
-            bot.send_message(message.chat.id, "❌ یافت نشد.")
+            bot.send_message(message.chat.id, f"❌ کاربر با آیدی `{target}` یافت نشد.")
         user_states.pop(uid, None)
 
     elif st == "make_gift_amount":
@@ -1469,4 +1501,4 @@ def on_text(message):
 if __name__ == "__main__":
     print("Bot starting...")
     bot.infinity_polling(timeout=30, long_polling_timeout=30)
-
+            ref
