@@ -226,14 +226,10 @@ class Bomber:
                     self.sent_total += 1
                     if self.sent_total >= self.sms_limit:
                         self.stop_event.set()
-            elif r.status_code in (400, 401, 403, 404, 422):
-                pass
             else:
-                with self.lock:
-                    self.fail += 1
+                pass
         except Exception:
-            with self.lock:
-                self.fail += 1
+            pass
 
     def _worker(self):
         while not self.stop_event.is_set():
@@ -279,7 +275,7 @@ class Bomber:
                         bot.edit_message_text(
                             f"⏳ **در حال ارسال...**\n\n"
                             f"📨 پیامک ارسال‌شده: **{self.sent_total}/{self.sms_limit}**\n"
-                            f"✅ موفق: {self.success} | ❌ ناموفق: {self.fail}\n"
+                            f"✅ موفق: {self.success}\n"
                             f"[{bar}] {pct}%\n\n",
                             self.user_id, status.message_id, 
                             reply_markup=stop_markup, parse_mode='Markdown')
@@ -300,7 +296,6 @@ class Bomber:
                     f"🏁 **پایان{stopped}!**\n\n"
                     f"📨 پیامک ارسال‌شده: **{self.sent_total}/{self.sms_limit}**\n"
                     f"✅ موفق: {self.success}\n"
-                    f"❌ ناموفق: {self.fail}\n"
                     f"📊 درصد موفقیت: {pct}%",
                     self.user_id, status.message_id, 
                     reply_markup=None, parse_mode='Markdown')
@@ -317,7 +312,7 @@ class Bomber:
             active_bomber_stop.pop(self.user_id, None)
 
 # ==========================================
-# 7. زمان‌بند
+# 7. زمان‌بند (اصلاح شده)
 # ==========================================
 def scheduler_loop():
     while True:
@@ -329,15 +324,24 @@ def scheduler_loop():
             for tid, uid, ph in c.fetchall():
                 u = get_user(uid)
                 if u and not u['is_banned']:
+                    if u['plan'] == "free" and u['free_trial_used']:
+                        c.execute("UPDATE schedules SET is_sent = 1 WHERE id = ?", (tid,))
+                        continue
+                    if u['plan'] != "free" and u['sub_expiry'] <= time.time():
+                        c.execute("UPDATE schedules SET is_sent = 1 WHERE id = ?", (tid,))
+                        continue
+                        
                     plan_info = PLANS.get(u['plan'], PLANS['free'])
                     b = Bomber(ph, uid, plan_info['sms_per_run'], u['silent_mode'])
                     active_bombers[str(uid)] = b
                     threading.Thread(target=b.start).start()
                     c.execute("UPDATE schedules SET is_sent = 1 WHERE id = ?", (tid,))
+                else:
+                    c.execute("UPDATE schedules SET is_sent = 1 WHERE id = ?", (tid,))
             conn.commit()
             conn.close()
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Scheduler error: {e}")
         time.sleep(30)
 
 threading.Thread(target=scheduler_loop, daemon=True).start()
@@ -431,15 +435,15 @@ def cmd_start(message):
            f"🔥 استریک: **{u['streak']}** روز")
     try:
         bot.send_photo(message.chat.id, PANEL_IMAGE_URL, caption=cap,
-                       reply_markup=get_main_menu(), parse_mode='Markdown')
+                       reply_markup=get_main_menu(), parse_mode='Markdown', protect_content=True)
     except Exception:
-        bot.send_message(message.chat.id, cap, reply_markup=get_main_menu(), parse_mode='Markdown')
+        bot.send_message(message.chat.id, cap, reply_markup=get_main_menu(), parse_mode='Markdown', protect_content=True)
 
 @bot.message_handler(commands=['admin'])
 def cmd_admin(message):
     if message.from_user.id != ADMIN_ID:
         return
-    bot.reply_to(message, "👑 **پنل مدیریت**", reply_markup=get_admin_menu(), parse_mode='Markdown')
+    bot.reply_to(message, "👑 **پنل مدیریت**", reply_markup=get_admin_menu(), parse_mode='Markdown', protect_content=True)
 
 @bot.message_handler(commands=['stop_bomb'])
 def cmd_stop(message):
@@ -479,7 +483,7 @@ def on_receipt(call):
             add_transaction(target, amt, "deposit", "شارژ با رسید")
             bot.send_message(ADMIN_ID, f"✅ **{fmt(amt)} تومان** به کاربر `{target}` شارژ شد.", parse_mode='Markdown')
             try:
-                bot.send_message(target, f"✅ **رسید شما تایید شد.**\n💰 مبلغ {fmt(amt)} تومان به کیف پول شما اضافه شد.", parse_mode='Markdown')
+                bot.send_message(target, f"✅ **رسید شما تایید شد.**\n💰 مبلغ {fmt(amt)} تومان به کیف پول شما اضافه شد.", parse_mode='Markdown', protect_content=True)
             except Exception:
                 pass
         try:
@@ -604,6 +608,21 @@ def on_callback(call):
             bot.answer_callback_query(call.id, "❌ بمبر فعالی برای شما یافت نشد.", show_alert=True)
 
     elif data == "menu_schedule":
+        # 1. چک کردن پلن
+        if u['plan'] == "free" and u['free_trial_used']:
+            bot.answer_callback_query(call.id, "❌ برای زمان‌بندی باید اشتراک بخرید!", show_alert=True)
+            return
+        if u['plan'] != "free" and u['sub_expiry'] <= time.time():
+            bot.answer_callback_query(call.id, "❌ اشتراک شما منقضی شده است!", show_alert=True)
+            return
+
+        # 2. چک کردن سقف روزانه
+        today = datetime.now().strftime("%Y-%m-%d")
+        limit = PLANS.get(u['plan'], {}).get('daily_limit', 1)
+        if u.get('last_daily_bomb_date') == today and u['daily_bomb_count'] >= limit:
+            bot.answer_callback_query(call.id, f"❌ سقف روزانه شما ({limit} بار) پر شده است! فردا بیایید.", show_alert=True)
+            return
+
         user_states[uid] = {"state": "wait_sched_phone"}
         m = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 انصراف", callback_data="menu_back"))
         bot.edit_message_caption("⏰ **شماره هدف برای زمان‌بندی:**",
@@ -719,7 +738,7 @@ def on_callback(call):
         add_xp(uid, 10)
         bot.answer_callback_query(call.id, "✅ خرید موفق!", show_alert=True)
         bot.send_message(call.message.chat.id,
-            f"🎉 **خرید موفق!**\n📦 {p[0]}\n\n📝 محتوا:\n`{p[2]}`", parse_mode='Markdown')
+            f"🎉 **خرید موفق!**\n📦 {p[0]}\n\n📝 محتوا:\n`{p[2]}`", parse_mode='Markdown', protect_content=True)
         try:
             bot.send_message(ADMIN_ID, f"🛒 خرید جدید: `{uid}` → {p[0]} ({fmt(p[1])}ت)")
         except Exception:
@@ -1148,7 +1167,7 @@ def on_photo(message):
     bot.send_photo(ADMIN_ID, message.photo[-1].file_id,
                    caption=f"💳 **رسید جدید**\n👤 کاربر: `{uid}`\nنام: {u['name']}\n\n"
                            f"💰 **مبلغ درخواستی:** {fmt(amount)} تومان",
-                   reply_markup=m, parse_mode='Markdown')
+                   reply_markup=m, parse_mode='Markdown', protect_content=True)
                    
     bot.send_message(message.chat.id, "✅ رسید ارسال شد. منتظر تایید ادمین باشید.")
     user_states.pop(uid, None)
@@ -1228,6 +1247,23 @@ def on_text(message):
         if mins < 1 or mins > 10080:
             bot.send_message(message.chat.id, "❌ بین ۱ تا ۱۰۰۸۰.")
             return
+            
+        # اینجا چک می‌کنیم و از سقف روزانه کم می‌کنیم
+        plan_info = PLANS.get(u['plan'], PLANS['free'])
+        today = datetime.now().strftime("%Y-%m-%d")
+        
+        if u.get('last_daily_bomb_date') == today:
+            if u['daily_bomb_count'] >= plan_info['daily_limit']:
+                bot.send_message(message.chat.id, "❌ سقف روزانه شما پر شده است!")
+                user_states.pop(uid, None)
+                return
+            u['daily_bomb_count'] += 1
+        else:
+            u['daily_bomb_count'] = 1
+            u['last_daily_bomb_date'] = today
+
+        save_user(**u)
+        
         ph = user_states[uid]["phone"]
         rt = time.time() + mins * 60
         conn = sqlite3.connect(DB_FILE)
@@ -1236,7 +1272,7 @@ def on_text(message):
         conn.commit()
         conn.close()
         user_states.pop(uid, None)
-        bot.send_message(message.chat.id, f"✅ بعد از {mins} دقیقه اجرا می‌شود.")
+        bot.send_message(message.chat.id, f"✅ بعد از {mins} دقیقه اجرا می‌شود. (۱ واحد از سهمیه روزانه شما کم شد)")
 
     elif st == "wait_gift":
         conn = sqlite3.connect(DB_FILE)
@@ -1435,7 +1471,7 @@ def on_text(message):
         sent = 0
         for (tid,) in all_u:
             try:
-                bot.send_message(tid, text)
+                bot.send_message(tid, text, protect_content=True)
                 sent += 1
                 time.sleep(0.05)
             except Exception:
