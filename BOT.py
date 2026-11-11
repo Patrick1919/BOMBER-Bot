@@ -213,7 +213,7 @@ def backup_loop():
     time.sleep(3)
     sync_from_turso()
     while True:
-        time.sleep(300)
+        time.sleep(60)
         backup_to_turso()
 
 threading.Thread(target=backup_loop, daemon=True).start()
