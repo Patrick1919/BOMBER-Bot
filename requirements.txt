@@ -2,4 +2,4 @@ pyTelegramBotAPI
 requests
 phonenumbers
 Flask
-libsql-experimental
+libsql-client
