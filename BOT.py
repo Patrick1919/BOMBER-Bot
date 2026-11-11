@@ -148,7 +148,7 @@ def fmt(n):
     return f"{int(n):,}"
 
 # ==========================================
-# 3. سیستم بکاپ خودکار به Turso
+# 3. سیستم بکاپ خودکار به Turso (ترکیبی)
 # ==========================================
 def sync_from_turso():
     if not TURSO_URL or not TURSO_TOKEN:
@@ -223,9 +223,9 @@ threading.Thread(target=backup_loop, daemon=True).start()
 # ==========================================
 PLANS = {
     "free":  {"name": "رایگان (تست)", "price": 0,      "days": 0,   "daily_limit": 1,  "sms_per_run": 50},
-    "basic": {"name": "پایه (۱ ماهه)", "price": 150000, "days": 30,  "daily_limit": 5,  "sms_per_run": 100},
-    "pro":   {"name": "حرفه‌ای (۳ ماهه)", "price": 450000, "days": 90,  "daily_limit": 15, "sms_per_run": 250},
-    "vip":   {"name": "ویژه (۱ ساله)", "price": 600000, "days": 365, "daily_limit": 25, "sms_per_run": 500},
+    "basic": {"name": "پایه (۱ ماهه)", "price": 150000, "days": 30,  "daily_limit": 5,  "sms_per_run": 150},
+    "pro":   {"name": "حرفه‌ای (۳ ماهه)", "price": 450000, "days": 90,  "daily_limit": 10, "sms_per_run": 400},
+    "vip":   {"name": "ویژه (۱ ساله)", "price": 600000, "days": 365, "daily_limit": 20, "sms_per_run": 900},
 }
 
 user_states = {}
@@ -452,11 +452,14 @@ def cmd_start(message):
         u['last_active'] = time.time()
         save_user(**u)
 
-    if u['sub_expiry'] > time.time():
-        days = (u['sub_expiry'] - time.time()) / 86400
-        if 0 < days <= 3:
-            bot.send_message(message.chat.id,
-                f"⚠️ فقط **{int(days)} روز** از اشتراکت مانده.", parse_mode='Markdown')
+    if u['plan'] != "free":
+        if u['sub_expiry'] > time.time():
+            days = (u['sub_expiry'] - time.time()) / 86400
+            if 0 < days <= 3:
+                bot.send_message(message.chat.id,
+                    f"⚠️ **توجه!** فقط **{int(days)} روز** از اشتراکت مانده. لطفاً تمدید کن.", parse_mode='Markdown')
+        else:
+            bot.send_message(message.chat.id, "⚠️ **اشتراک شما منقضی شده است!** لطفاً از بخش خرید اشتراک، پلن جدید تهیه کنید.", parse_mode='Markdown')
 
     cap = (f"سلام [{message.from_user.first_name}](tg://user?id={uid}) 👋\n"
            f"به **Blood-BOMBER** خوش آمدی.\n\n"
@@ -875,27 +878,24 @@ def on_callback(call):
         bot.send_message(call.message.chat.id,
             f"🎉 **{p['name']} فعال شد!**\n📅 {p['days']} روز", parse_mode='Markdown')
 
-    # ================= جایزه روزانه (اصلاح شده) =================
+    # ================= جایزه روزانه =================
     elif data == "menu_daily":
         now = time.time()
         if now - u['last_daily'] < 86400:
             left = int((86400 - (now - u['last_daily'])) / 3600)
             bot.answer_callback_query(call.id, f"⏳ {left} ساعت دیگه!", show_alert=True)
             return
-            
-        # به جای پول، ۱ روز به اعتبار زمانی کاربر اضافه میشه
-        current_expiry = u['sub_expiry'] if u['sub_expiry'] > now else now
-        u['sub_expiry'] = current_expiry + 86400 # 1 روز
         
         u['last_daily'] = now
         u['streak'] = u['streak'] + 1
+        add_xp(uid, 20) # فقط 20 تا XP
         save_user(**u)
-        add_xp(uid, 5)
         
-        bot.answer_callback_query(call.id, "🎁 ۱ روز اعتبار زمانی گرفتی!", show_alert=True)
+        bot.answer_callback_query(call.id, "🎁 ۲۰ امتیاز (XP) گرفتی!", show_alert=True)
         bot.send_message(call.message.chat.id,
-            f"🎁 **جایزه روزانه:** ۱ روز به اعتبار اشتراک شما اضافه شد!\n"
-            f"🔥 استریک: **{u['streak']}** روز", parse_mode='Markdown')
+            f"🎁 **جایزه روزانه:** ۲۰ امتیاز به شما اضافه شد!\n"
+            f"🔥 استریک: **{u['streak']}** روز\n"
+            f"💡 هر ۱۰۰ امتیاز، سطح شما را بالا می‌برد.", parse_mode='Markdown')
 
     # ================= کد هدیه =================
     elif data == "menu_gift":
