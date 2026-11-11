@@ -3,6 +3,7 @@ import threading
 import time
 import requests
 import os
+import sqlite3
 import libsql
 import uuid
 import telebot
@@ -16,6 +17,7 @@ from datetime import datetime
 BOT_TOKEN = os.environ.get('BOT_TOKEN', 'YOUR_BOT_TOKEN_HERE')
 ADMIN_ID = 6914309071
 OWNER_USERNAME = "@lm_Patrick"
+DB_FILE = "bot_database.db" 
 TURSO_URL = os.environ.get("TURSO_DATABASE_URL")
 TURSO_TOKEN = os.environ.get("TURSO_AUTH_TOKEN")
 PANEL_IMAGE_URL = "https://i.imgur.com/Z7lvgzO.jpeg"
@@ -49,13 +51,10 @@ def run_web():
 threading.Thread(target=run_web, daemon=True).start()
 
 # ==========================================
-# 2. توابع اتصال به Turso
+# 2. توابع دیتابیس (SQLite محلی برای سرعت بالا)
 # ==========================================
-def get_db():
-    return libsql.connect(database=TURSO_URL, auth_token=TURSO_TOKEN)
-
 def init_db():
-    conn = get_db()
+    conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS users (
         user_id TEXT PRIMARY KEY, name TEXT, plan TEXT, uses INTEGER,
@@ -87,12 +86,9 @@ def init_db():
 
 init_db()
 
-# ==========================================
-# 3. توابع دیتابیس
-# ==========================================
 def get_user(user_id):
     user_id = str(user_id).strip().replace("@", "")
-    conn = get_db()
+    conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
     row = c.fetchone()
@@ -107,7 +103,7 @@ def get_user(user_id):
 
 def save_user(**u):
     u['user_id'] = str(u.get('user_id')).strip()
-    conn = get_db()
+    conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute("""INSERT OR REPLACE INTO users
         (user_id, name, plan, uses, last_daily, sub_expiry, daily_bomb_count,
@@ -127,7 +123,7 @@ def save_user(**u):
     conn.close()
 
 def add_transaction(user_id, amount, type_, desc):
-    conn = get_db()
+    conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute("INSERT INTO transactions (user_id, amount, type, description, created_at) VALUES (?,?,?,?,?)",
               (str(user_id), amount, type_, desc, time.time()))
@@ -150,6 +146,84 @@ def add_xp(user_id, amount):
 
 def fmt(n):
     return f"{int(n):,}"
+
+# ==========================================
+# 3. سیستم بکاپ خودکار به Turso (در پس‌زمینه)
+# ==========================================
+def sync_from_turso():
+    if not TURSO_URL or not TURSO_TOKEN:
+        return
+    try:
+        # دانلود از Turso به لوکال موقع روشن شدن
+        turso_conn = libsql.connect(database=TURSO_URL, auth_token=TURSO_TOKEN)
+        c = turso_conn.cursor()
+        c.execute("SELECT * FROM users")
+        users = c.fetchall()
+        turso_conn.close()
+
+        local_conn = sqlite3.connect(DB_FILE)
+        lc = local_conn.cursor()
+        for user in users:
+            lc.execute("""INSERT OR REPLACE INTO users 
+                (user_id, name, plan, uses, last_daily, sub_expiry, daily_bomb_count, last_bomb_date, total_purchases, free_trial_used, last_bomb_time, silent_mode, is_banned, last_active, streak, wallet, xp, level, referral_count, referred_by, last_daily_bomb_date) 
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", user)
+        local_conn.commit()
+        local_conn.close()
+        print("✅ اطلاعات از Turso دانلود شد.")
+    except Exception as e:
+        print(f"خطا در دانلود از Turso: {e}")
+
+def backup_to_turso():
+    if not TURSO_URL or not TURSO_TOKEN:
+        return
+    try:
+        turso_conn = libsql.connect(database=TURSO_URL, auth_token=TURSO_TOKEN)
+        local_conn = sqlite3.connect(DB_FILE)
+        local_c = local_conn.cursor()
+        
+        # 1. بکاپ کاربران
+        local_c.execute("SELECT * FROM users")
+        users = local_c.fetchall()
+        for user in users:
+            turso_conn.execute("""INSERT OR REPLACE INTO users 
+                (user_id, name, plan, uses, last_daily, sub_expiry, daily_bomb_count, last_bomb_date, total_purchases, free_trial_used, last_bomb_time, silent_mode, is_banned, last_active, streak, wallet, xp, level, referral_count, referred_by, last_daily_bomb_date) 
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", user)
+            
+        # 2. بکاپ محصولات
+        local_c.execute("SELECT * FROM products")
+        prods = local_c.fetchall()
+        for p in prods:
+            turso_conn.execute("INSERT OR REPLACE INTO products (id, name, price, description, content, stock, category) VALUES (?,?,?,?,?,?,?)", p)
+
+        # 3. بکاپ کدهای هدیه
+        local_c.execute("SELECT * FROM gift_codes")
+        gifts = local_c.fetchall()
+        for g in gifts:
+            turso_conn.execute("INSERT OR REPLACE INTO gift_codes (code, amount, max_uses, used_count, created_at) VALUES (?,?,?,?,?)", g)
+
+        # 4. بکاپ تراکنش‌ها
+        local_c.execute("SELECT * FROM transactions")
+        txs = local_c.fetchall()
+        for t in txs:
+            turso_conn.execute("INSERT OR REPLACE INTO transactions (id, user_id, amount, type, description, created_at) VALUES (?,?,?,?,?,?)", t)
+        
+        turso_conn.commit()
+        turso_conn.close()
+        local_conn.close()
+        print("✅ بکاپ روی Turso انجام شد.")
+    except Exception as e:
+        print(f"خطا در بکاپ: {e}")
+
+def backup_loop():
+    # اول از Turso دانلود میکنیم (برای ری‌استارت‌ها)
+    time.sleep(3)
+    sync_from_turso()
+    
+    while True:
+        time.sleep(300) # هر 5 دقیقه
+        backup_to_turso()
+
+threading.Thread(target=backup_loop, daemon=True).start()
 
 # ==========================================
 # 4. پلن‌ها و وضعیت‌ها
@@ -612,7 +686,7 @@ def on_callback(call):
                                  reply_markup=m, parse_mode='Markdown')
 
     elif data == "wallet_tx":
-        conn = get_db()
+        conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
         c.execute("SELECT amount, type, description, created_at FROM transactions WHERE user_id = ? ORDER BY id DESC LIMIT 15", (uid,))
         rows = c.fetchall()
@@ -630,7 +704,7 @@ def on_callback(call):
 
     # ================= فروشگاه =================
     elif data == "menu_shop":
-        conn = get_db()
+        conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
         c.execute("SELECT id, name, price, description, category, stock FROM products")
         prods = c.fetchall()
@@ -650,7 +724,7 @@ def on_callback(call):
 
     elif data.startswith("buy_product_"):
         pid = int(data.replace("buy_product_", ""))
-        conn = get_db()
+        conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
         c.execute("SELECT name, price, content, stock FROM products WHERE id = ?", (pid,))
         p = c.fetchone()
@@ -668,7 +742,7 @@ def on_callback(call):
         u['total_purchases'] += 1
         save_user(**u)
         add_transaction(uid, p[1], "purchase", f"خرید {p[0]}")
-        conn = get_db()
+        conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
         c.execute("INSERT INTO purchases (user_id, item_name, price, created_at) VALUES (?,?,?,?)",
                   (uid, p[0], p[1], time.time()))
@@ -686,7 +760,7 @@ def on_callback(call):
             pass
 
     elif data == "menu_history":
-        conn = get_db()
+        conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
         c.execute("SELECT item_name, price, created_at FROM purchases WHERE user_id = ? ORDER BY id DESC LIMIT 15", (uid,))
         rows = c.fetchall()
@@ -808,25 +882,26 @@ def on_callback(call):
         bot.send_message(call.message.chat.id,
             f"🎉 **{p['name']} فعال شد!**\n📅 {p['days']} روز", parse_mode='Markdown')
 
-    # ================= جایزه روزانه =================
+    # ================= جایزه روزانه (اصلاح شده) =================
     elif data == "menu_daily":
         now = time.time()
         if now - u['last_daily'] < 86400:
             left = int((86400 - (now - u['last_daily'])) / 3600)
             bot.answer_callback_query(call.id, f"⏳ {left} ساعت دیگه!", show_alert=True)
             return
-        base = random.randint(5000, 20000)
-        bonus = u['streak'] * 2000
-        total = base + bonus
-        u['wallet'] += total
+            
+        # به جای پول، ۱ روز به اعتبار زمانی کاربر اضافه میشه
+        current_expiry = u['sub_expiry'] if u['sub_expiry'] > now else now
+        u['sub_expiry'] = current_expiry + 86400 # 1 روز
+        
         u['last_daily'] = now
         u['streak'] = u['streak'] + 1
         save_user(**u)
-        add_transaction(uid, total, "daily", f"جایزه روزانه + استریک {u['streak']}")
         add_xp(uid, 5)
-        bot.answer_callback_query(call.id, f"🎁 {fmt(total)}ت گرفتی!", show_alert=True)
+        
+        bot.answer_callback_query(call.id, "🎁 ۱ روز اعتبار زمانی گرفتی!", show_alert=True)
         bot.send_message(call.message.chat.id,
-            f"🎁 **جایزه روزانه:** {fmt(base)}ت + پاداش استریک {fmt(bonus)}ت = **{fmt(total)}ت**\n"
+            f"🎁 **جایزه روزانه:** ۱ روز به اعتبار اشتراک شما اضافه شد!\n"
             f"🔥 استریک: **{u['streak']}** روز", parse_mode='Markdown')
 
     # ================= کد هدیه =================
@@ -867,7 +942,7 @@ def on_callback(call):
                                  reply_markup=m, parse_mode='Markdown')
 
     elif data == "ticket_mine":
-        conn = get_db()
+        conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
         c.execute("SELECT id, message, status, admin_reply FROM tickets WHERE user_id = ? ORDER BY id DESC LIMIT 10", (uid,))
         rows = c.fetchall()
@@ -890,7 +965,7 @@ def on_callback(call):
         bot.send_message(call.message.chat.id, "👑 **پنل مدیریت**", reply_markup=get_admin_menu(), parse_mode='Markdown')
 
     elif data == "admin_stats":
-        conn = get_db()
+        conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
         c.execute("SELECT COUNT(*), SUM(wallet), SUM(total_purchases), SUM(xp) FROM users")
         r = c.fetchone()
@@ -914,7 +989,7 @@ def on_callback(call):
                               reply_markup=m, parse_mode='Markdown')
 
     elif data == "admin_list_users":
-        conn = get_db()
+        conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
         c.execute("SELECT user_id, name, wallet, is_banned, level FROM users ORDER BY last_active DESC LIMIT 30")
         rows = c.fetchall()
@@ -964,7 +1039,7 @@ def on_callback(call):
 
     elif data.startswith("bulk_charge_yes_"):
         amt = int(data.replace("bulk_charge_yes_", ""))
-        conn = get_db()
+        conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
         c.execute("SELECT user_id FROM users WHERE is_banned = 0")
         users = c.fetchall()
@@ -986,7 +1061,7 @@ def on_callback(call):
 
     elif data.startswith("bulk_deduct_yes_"):
         amt = int(data.replace("bulk_deduct_yes_", ""))
-        conn = get_db()
+        conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
         c.execute("SELECT user_id, wallet FROM users WHERE is_banned = 0")
         users = c.fetchall()
@@ -1014,7 +1089,7 @@ def on_callback(call):
         bot.send_message(call.message.chat.id, "📝 نام محصول:")
 
     elif data == "admin_del_product":
-        conn = get_db()
+        conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
         c.execute("SELECT id, name FROM products")
         prods = c.fetchall()
@@ -1027,7 +1102,7 @@ def on_callback(call):
 
     elif data.startswith("del_prod_"):
         pid = int(data.replace("del_prod_", ""))
-        conn = get_db()
+        conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
         c.execute("DELETE FROM products WHERE id = ?", (pid,))
         conn.commit()
@@ -1039,7 +1114,7 @@ def on_callback(call):
         bot.send_message(call.message.chat.id, "💰 مبلغ کد هدیه:")
 
     elif data == "admin_tickets":
-        conn = get_db()
+        conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
         c.execute("SELECT id, user_id, message FROM tickets WHERE status = 'open' ORDER BY id ASC LIMIT 10")
         rows = c.fetchall()
@@ -1149,7 +1224,7 @@ def on_text(message):
             reply_markup=m, parse_mode='Markdown')
 
     elif st == "wait_gift":
-        conn = get_db()
+        conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
         c.execute("SELECT amount, max_uses, used_count FROM gift_codes WHERE code = ?", (text,))
         row = c.fetchone()
@@ -1167,7 +1242,7 @@ def on_text(message):
         user_states.pop(uid, None)
 
     elif st == "wait_ticket":
-        conn = get_db()
+        conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
         c.execute("INSERT INTO tickets (user_id, message, created_at) VALUES (?,?,?)",
                   (uid, text, time.time()))
@@ -1186,7 +1261,7 @@ def on_text(message):
 
     elif st == "ticket_reply":
         tid = user_states[uid]["tid"]
-        conn = get_db()
+        conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
         c.execute("SELECT user_id FROM tickets WHERE id = ?", (tid,))
         row = c.fetchone()
@@ -1241,7 +1316,7 @@ def on_text(message):
         except ValueError:
             stock = -1
         d = user_states[uid]
-        conn = get_db()
+        conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
         c.execute("INSERT INTO products (name, price, description, content, category, stock) VALUES (?,?,?,?,?,?)",
                   (d["name"], d["price"], d["desc"], d["content"], d["cat"], stock))
@@ -1337,7 +1412,7 @@ def on_text(message):
         user_states.pop(uid, None)
 
     elif st == "admin_bcast":
-        conn = get_db()
+        conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
         c.execute("SELECT user_id FROM users WHERE is_banned = 0")
         all_u = c.fetchall()
@@ -1396,7 +1471,7 @@ def on_text(message):
             mx = 1
         amt = user_states[uid]["amount"]
         code = "GIFT" + str(random.randint(100000, 999999))
-        conn = get_db()
+        conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
         c.execute("INSERT INTO gift_codes (code, amount, max_uses, created_at) VALUES (?,?,?,?)",
                   (code, amt, mx, time.time()))
@@ -1414,7 +1489,7 @@ def on_text(message):
             bot.send_message(message.chat.id, "❌ عدد مثبت بده.")
             return
         user_states[uid] = {"state": "bulk_charge_confirm", "amount": amt}
-        conn = get_db()
+        conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
         c.execute("SELECT COUNT(*) FROM users")
         count = c.fetchone()[0]
@@ -1438,7 +1513,7 @@ def on_text(message):
             bot.send_message(message.chat.id, "❌ عدد مثبت بده.")
             return
         user_states[uid] = {"state": "bulk_deduct_confirm", "amount": amt}
-        conn = get_db()
+        conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
         c.execute("SELECT COUNT(*), SUM(wallet) FROM users")
         r = c.fetchone()
