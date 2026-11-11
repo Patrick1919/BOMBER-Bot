@@ -383,7 +383,7 @@ def get_admin_menu():
           types.InlineKeyboardButton("📋 تیکت‌های باز", callback_data="admin_tickets"))
     m.add(types.InlineKeyboardButton("💾 بکاپ دیتابیس", callback_data="admin_backup"))
     return m
-    # ==========================================
+# ==========================================
 # 9. start / admin / stop_bomb
 # ==========================================
 @bot.message_handler(commands=['start'])
