@@ -148,13 +148,12 @@ def fmt(n):
     return f"{int(n):,}"
 
 # ==========================================
-# 3. سیستم بکاپ خودکار به Turso (در پس‌زمینه)
+# 3. سیستم بکاپ خودکار به Turso
 # ==========================================
 def sync_from_turso():
     if not TURSO_URL or not TURSO_TOKEN:
         return
     try:
-        # دانلود از Turso به لوکال موقع روشن شدن
         turso_conn = libsql.connect(database=TURSO_URL, auth_token=TURSO_TOKEN)
         c = turso_conn.cursor()
         c.execute("SELECT * FROM users")
@@ -181,7 +180,6 @@ def backup_to_turso():
         local_conn = sqlite3.connect(DB_FILE)
         local_c = local_conn.cursor()
         
-        # 1. بکاپ کاربران
         local_c.execute("SELECT * FROM users")
         users = local_c.fetchall()
         for user in users:
@@ -189,19 +187,16 @@ def backup_to_turso():
                 (user_id, name, plan, uses, last_daily, sub_expiry, daily_bomb_count, last_bomb_date, total_purchases, free_trial_used, last_bomb_time, silent_mode, is_banned, last_active, streak, wallet, xp, level, referral_count, referred_by, last_daily_bomb_date) 
                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", user)
             
-        # 2. بکاپ محصولات
         local_c.execute("SELECT * FROM products")
         prods = local_c.fetchall()
         for p in prods:
             turso_conn.execute("INSERT OR REPLACE INTO products (id, name, price, description, content, stock, category) VALUES (?,?,?,?,?,?,?)", p)
 
-        # 3. بکاپ کدهای هدیه
         local_c.execute("SELECT * FROM gift_codes")
         gifts = local_c.fetchall()
         for g in gifts:
             turso_conn.execute("INSERT OR REPLACE INTO gift_codes (code, amount, max_uses, used_count, created_at) VALUES (?,?,?,?,?)", g)
 
-        # 4. بکاپ تراکنش‌ها
         local_c.execute("SELECT * FROM transactions")
         txs = local_c.fetchall()
         for t in txs:
@@ -215,12 +210,10 @@ def backup_to_turso():
         print(f"خطا در بکاپ: {e}")
 
 def backup_loop():
-    # اول از Turso دانلود میکنیم (برای ری‌استارت‌ها)
     time.sleep(3)
     sync_from_turso()
-    
     while True:
-        time.sleep(300) # هر 5 دقیقه
+        time.sleep(300)
         backup_to_turso()
 
 threading.Thread(target=backup_loop, daemon=True).start()
