@@ -223,9 +223,9 @@ threading.Thread(target=backup_loop, daemon=True).start()
 # ==========================================
 PLANS = {
     "free":  {"name": "رایگان (تست)", "price": 0,      "days": 0,   "daily_limit": 1,  "sms_per_run": 50},
-    "basic": {"name": "پایه (۱ ماهه)", "price": 150000, "days": 30,  "daily_limit": 5,  "sms_per_run": 150},
-    "pro":   {"name": "حرفه‌ای (۳ ماهه)", "price": 450000, "days": 90,  "daily_limit": 10, "sms_per_run": 400},
-    "vip":   {"name": "ویژه (۱ ساله)", "price": 600000, "days": 365, "daily_limit": 20, "sms_per_run": 900},
+    "basic": {"name": "پایه (۱ ماهه)", "price": 95000, "days": 30,  "daily_limit": 5,  "sms_per_run": 150},
+    "pro":   {"name": "حرفه‌ای (۳ ماهه)", "price": 280000, "days": 90,  "daily_limit": 10, "sms_per_run": 400},
+    "vip":   {"name": "ویژه (6 ماهه)", "price": , 490000"days": 180, "daily_limit": 20, "sms_per_run": 900},
 }
 
 user_states = {}
