@@ -242,5 +242,7 @@ SERVICES_LIST = [
     {'name': 'Offch', 'url': 'https://api.offch.com/auth/otp', 'method': 'POST', 'data': lambda phone: {"username": "0" + phone.split("+98")[1]}, 'json': True},
     {'name': 'Sabziman', 'url': 'https://sabziman.com/wp-admin/admin-ajax.php', 'method': 'POST', 'data': lambda phone: {"action": "newphoneexist", "phonenumber": "0" + phone.split("+98")[1]}, 'json': False},
     {'name': 'TajTehran', 'url': 'https://tajtehran.com/RegisterRequest', 'method': 'POST', 'data': lambda phone: {"mobile": "0" + phone.split("+98")[1], "password": "mamad1234"}, 'json': False},
-    {'name': 'MrBilitCall', 'url': 'https://auth.mrbilit.com/api/Token/send/byCall', 'method': 'GET', 'data': lambda phone: {"mobile": "0" + phone.split("+98")[1]}, 'json': False}
+    {'name': 'MrBilitCall', 'url': 'https://auth.mrbilit.com/api/Token/send/byCall', 'method': 'GET', 'data': lambda phone: {"mobile": "0" + phone.split("+98")[1]}, 'json': False},
+    {'name': 'webpoosh', 'url': 'https://www.webpoosh.com/register', 'method': 'POST', 'data': lambda phone: {"phone": phone}, 'json': True},
+    {'name': 'modiseh', 'url': 'https://www.modiseh.com/backend/v2/public/customer/login', 'method': 'POST', 'data': lambda phone: {"phone": phone}, 'json': True},
 ]
